@@ -14,14 +14,14 @@ import (
 
 	bubbletea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/meowrain/localsend-go/internal/config"
-	"github.com/meowrain/localsend-go/internal/discovery"
-	"github.com/meowrain/localsend-go/internal/discovery/shared"
-	"github.com/meowrain/localsend-go/internal/handlers"
-	"github.com/meowrain/localsend-go/internal/pkg/server"
-	"github.com/meowrain/localsend-go/internal/utils/cert"
-	"github.com/meowrain/localsend-go/internal/utils/logger"
-	"github.com/meowrain/localsend-go/static"
+	"github.com/tingkai-c/localsend-tui/internal/config"
+	"github.com/tingkai-c/localsend-tui/internal/discovery"
+	"github.com/tingkai-c/localsend-tui/internal/discovery/shared"
+	"github.com/tingkai-c/localsend-tui/internal/handlers"
+	"github.com/tingkai-c/localsend-tui/internal/pkg/server"
+	"github.com/tingkai-c/localsend-tui/internal/utils/cert"
+	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
+	"github.com/tingkai-c/localsend-tui/static"
 	qrcode "github.com/skip2/go-qrcode"
 )
 
@@ -431,9 +431,9 @@ func init() {
 // in environments where UserConfigDir is not writable.
 func certDir() string {
 	if base, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(base, "localsend-go")
+		return filepath.Join(base, "localsend-tui")
 	}
-	return ".localsend-go"
+	return ".localsend-tui"
 }
 
 func main() {

@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/meowrain/localsend-go/internal/models"
+	"github.com/tingkai-c/localsend-tui/internal/models"
 
-	"github.com/meowrain/localsend-go/internal/utils/clipboard"
-	"github.com/meowrain/localsend-go/internal/utils/logger"
+	"github.com/tingkai-c/localsend-tui/internal/utils/clipboard"
+	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
 	"github.com/schollz/progressbar/v3"
 )
 

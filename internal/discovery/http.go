@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/meowrain/localsend-go/internal/utils/logger"
+	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
 
 	probing "github.com/prometheus-community/pro-bing"
 )

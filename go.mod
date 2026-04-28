@@ -1,4 +1,4 @@
-module github.com/meowrain/localsend-go
+module github.com/tingkai-c/localsend-tui
 
 go 1.22
 

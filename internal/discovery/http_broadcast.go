@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/meowrain/localsend-go/internal/discovery/shared"
-	"github.com/meowrain/localsend-go/internal/models"
-	"github.com/meowrain/localsend-go/internal/utils/logger"
+	"github.com/tingkai-c/localsend-tui/internal/discovery/shared"
+	"github.com/tingkai-c/localsend-tui/internal/models"
+	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
 )
 
 func ListenForHttpBroadCast(updates chan<- []models.SendModel) {

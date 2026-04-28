@@ -12,12 +12,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/meowrain/localsend-go/internal/discovery"
-	"github.com/meowrain/localsend-go/internal/discovery/shared"
-	"github.com/meowrain/localsend-go/internal/models"
-	"github.com/meowrain/localsend-go/internal/tui"
-	"github.com/meowrain/localsend-go/internal/utils/logger"
-	"github.com/meowrain/localsend-go/internal/utils/sha256"
+	"github.com/tingkai-c/localsend-tui/internal/discovery"
+	"github.com/tingkai-c/localsend-tui/internal/discovery/shared"
+	"github.com/tingkai-c/localsend-tui/internal/models"
+	"github.com/tingkai-c/localsend-tui/internal/tui"
+	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
+	"github.com/tingkai-c/localsend-tui/internal/utils/sha256"
 	"github.com/schollz/progressbar/v3"
 )
 

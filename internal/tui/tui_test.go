@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/meowrain/localsend-go/internal/models"
+	"github.com/tingkai-c/localsend-tui/internal/models"
 )
 
 // TestSelectDevice 测试 SelectDevice 函数

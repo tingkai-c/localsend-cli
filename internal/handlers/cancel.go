@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/meowrain/localsend-go/internal/utils/logger"
+	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
 )
 
 var (
