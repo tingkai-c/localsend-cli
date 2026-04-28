@@ -466,6 +466,10 @@ func main() {
 		httpServer.HandleFunc("/api/localsend/v2/upload", handlers.ReceiveHandler)
 		httpServer.HandleFunc("/api/localsend/v2/info", handlers.GetInfoHandler)
 		httpServer.HandleFunc("/api/localsend/v2/cancel", handlers.HandleCancel)
+		// LocalSend clients probe v1/info as a discovery sanity-check before
+		// falling through to v2. Returning the v2 payload is safe — extra
+		// fields are ignored by v1 clients.
+		httpServer.HandleFunc("/api/localsend/v1/info", handlers.GetInfoHandler)
 	}
 	go func() {
 		addr := ":" + fmt.Sprintf("%d", port)
