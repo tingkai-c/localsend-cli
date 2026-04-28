@@ -1,10 +1,9 @@
 <div align="center">
-    <h1>LocalSend Go</h1>
-    <h4>✨使用Go实现的LocalSend命令行工具✨</h4>
-    <img src="https://forthebadge.com/images/badges/built-with-love.svg" />
-    <br>
-    <img src="https://counter.seku.su/cmoe?name=localsend-go&theme=mb" alt="localsend-go" />
+    <h1>LocalSend TUI</h1>
+    <h4>✨ A headless / TUI LocalSend client written in Go ✨</h4>
 </div>
+
+> Fork of [meowrain/localsend-go](https://github.com/meowrain/localsend-go) with HTTPS support and a stable certificate fingerprint, so the official LocalSend mobile/desktop apps can connect with their default (encrypted) settings.
 
 ## 文档 | Document | ドキュメント
 
@@ -20,7 +19,7 @@
 ### 使用go install安装
 
 ```bash
-go install github.com/meowrain/localsend-go@latest
+go install github.com/tingkai-c/localsend-tui@latest
 ```
 
 ### 从包管理器安装 | Install from Package Manager | パッケージマネージャーからインストール

@@ -1,2 +1,4 @@
 bin/
 !debian/usr/local/bin/
+uploads/
+.omc/
