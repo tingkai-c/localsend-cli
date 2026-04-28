@@ -16,14 +16,17 @@ var (
 )
 
 // https://github.com/localsend/protocol?tab=readme-ov-file#71-device-type
+//
+// Fingerprint is populated at runtime from the SHA-256 of the TLS certificate
+// the server presents — LocalSend clients pin peers by this value, so it must
+// match the certificate actually served.
 var Message = models.BroadcastMessage{
 	Alias:       config.ConfigData.NameOfDevice,
 	Version:     "2.0",
 	DeviceModel: utils.CheckOSType(),
-	DeviceType:  "headless",      // CLI工具使用headless类型
-	Fingerprint: "random-string", // 应该生成一个唯一的指纹
+	DeviceType:  "headless",
 	Port:        53317,
-	Protocol:    "http",
+	Protocol:    "https",
 	Download:    true,
 	Announce:    true,
 }

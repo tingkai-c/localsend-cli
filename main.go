@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -15,8 +16,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/meowrain/localsend-go/internal/config"
 	"github.com/meowrain/localsend-go/internal/discovery"
+	"github.com/meowrain/localsend-go/internal/discovery/shared"
 	"github.com/meowrain/localsend-go/internal/handlers"
 	"github.com/meowrain/localsend-go/internal/pkg/server"
+	"github.com/meowrain/localsend-go/internal/utils/cert"
 	"github.com/meowrain/localsend-go/internal/utils/logger"
 	"github.com/meowrain/localsend-go/static"
 	qrcode "github.com/skip2/go-qrcode"
@@ -423,6 +426,16 @@ func init() {
 	flag.IntVar(&port, "port", 53317, "Port to listen on")
 }
 
+// certDir returns the directory where the TLS certificate and key are
+// persisted. Falling back to the current directory keeps the program usable
+// in environments where UserConfigDir is not writable.
+func certDir() string {
+	if base, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(base, "localsend-go")
+	}
+	return ".localsend-go"
+}
+
 func main() {
 	var flagOpen bool = false
 	signalChan := make(chan os.Signal, 1)
@@ -434,7 +447,17 @@ func main() {
 	}()
 	logger.InitLogger()
 
-	// Start HTTP server
+	// LocalSend v2 mandates HTTPS with self-signed certificates pinned by
+	// fingerprint. Generate or load a stable cert before starting the server
+	// and the discovery broadcast so both advertise the same fingerprint.
+	tlsCert, fp, err := cert.GenerateOrLoad(certDir())
+	if err != nil {
+		log.Fatalf("Failed to prepare TLS certificate: %v", err)
+	}
+	shared.Message.Fingerprint = fp
+	shared.Message.Port = port
+
+	// Start HTTPS server
 	httpServer := server.New()
 
 	/* Send and receive section */
@@ -445,8 +468,14 @@ func main() {
 		httpServer.HandleFunc("/api/localsend/v2/cancel", handlers.HandleCancel)
 	}
 	go func() {
-		logger.Info("Server started at :" + fmt.Sprintf("%d", port))
-		if err := http.ListenAndServe(":"+fmt.Sprintf("%d", port), httpServer); err != nil {
+		addr := ":" + fmt.Sprintf("%d", port)
+		logger.Info("Server started at " + addr + " (https, fingerprint=" + fp + ")")
+		srv := &http.Server{
+			Addr:      addr,
+			Handler:   httpServer,
+			TLSConfig: &tls.Config{Certificates: []tls.Certificate{tlsCert}},
+		}
+		if err := srv.ListenAndServeTLS("", ""); err != nil {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()
