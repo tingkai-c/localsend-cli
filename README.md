@@ -14,28 +14,59 @@
 - v1.2.2 - 当前最新版本 | Current Version | 現行バージョン
 - [v1.1.0](doc/version1.1.0/) - 历史版本 | Historical Version | 過去のバージョン
 
-## 快速开始 | Quick Start | クイックスタート
+## Install
 
-### 使用go install安装
+No Go toolchain required for the one-liners below — they download the right pre-built binary from [GitHub Releases](https://github.com/tingkai-c/localsend-cli/releases/latest), verify its SHA-256 against `checksums.txt`, and drop it on your `PATH`.
+
+### Linux & macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh
+```
+
+Defaults to `/usr/local/bin`, falling back to `~/.local/bin` if the former isn't writable. Override with env vars:
+
+```bash
+# Pin a specific version
+VERSION=v1.2.6 curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh
+
+# Install to a custom directory
+INSTALL_DIR=$HOME/bin curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh
+```
+
+If you'd rather review the script before piping it to `sh`:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh
+less install.sh
+sh install.sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.ps1 | iex
+```
+
+Installs to `%LOCALAPPDATA%\Programs\localsend-cli` and adds it to your **user** `PATH` (no admin needed). Override with `$env:VERSION` or `$env:INSTALL_DIR` before invoking.
+
+### Manual download
+
+Grab the archive for your OS/arch from the [latest release](https://github.com/tingkai-c/localsend-cli/releases/latest), verify it against `checksums.txt`, extract, and put `localsend-cli` on your `PATH`. Asset names follow the pattern `localsend-cli_<version>_<os>_<arch>.{tar.gz,zip}`.
+
+### Arch Linux (AUR)
+
+```bash
+yay -S localsend-cli
+```
+
+### Build from source (requires Go 1.22+)
 
 ```bash
 go install github.com/tingkai-c/localsend-cli@latest
-```
-
-### 从包管理器安装 | Install from Package Manager | パッケージマネージャーからインストール
-
-#### Arch Linux
-```bash
-yay -Syy
-yay -S localsend-go
-```
-
-### 从源码编译 | Build from Source | ソースからビルド
-
-```bash
-git clone https://github.com/meowrain/localsend_cli.git
-cd localsend_cli
-make build
+# or
+git clone https://github.com/tingkai-c/localsend-cli.git
+cd localsend-cli && make build
 ```
 
 ## Configuration

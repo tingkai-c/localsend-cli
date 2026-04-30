@@ -29,29 +29,42 @@ The following documentation is for version v1.2.0.
 
 ## Installation
 
-### Package Manager
+The one-liners below download a pre-built binary from [GitHub Releases](https://github.com/tingkai-c/localsend-cli/releases/latest), verify its SHA-256, and install it. No Go toolchain required.
 
-#### Arch Linux
-> ⚠️ Note: The arch package is still on version 1.1.0
+### Linux & macOS
 
 ```bash
-yay -Syy
-yay -S localsend-go
+curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh
 ```
 
-### Build from Source
+Override with `VERSION=v1.2.6`, `INSTALL_DIR=$HOME/bin`, or `BIN_NAME=lsc`.
 
-1. Ensure Go 1.22 or higher is installed
-2. Clone the repository
-   ```bash
-   git clone https://github.com/meowrain/localsend_cli.git
-   cd localsend_cli
-   ```
+### Windows (PowerShell)
 
-3. Build
-   ```bash
-   make build
-   ```
+```powershell
+irm https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.ps1 | iex
+```
+
+Installs into `%LOCALAPPDATA%\Programs\localsend-cli` and updates the user `PATH`.
+
+### Manual download
+
+Pick the archive for your OS/arch from the [latest release](https://github.com/tingkai-c/localsend-cli/releases/latest) (`localsend-cli_<version>_<os>_<arch>.tar.gz` or `.zip`), verify against `checksums.txt`, extract, and put `localsend-cli` on your `PATH`.
+
+### Arch Linux (AUR)
+
+```bash
+yay -S localsend-cli
+```
+
+### Build from source (requires Go 1.22+)
+
+```bash
+go install github.com/tingkai-c/localsend-cli@latest
+# or
+git clone https://github.com/tingkai-c/localsend-cli.git
+cd localsend-cli && make build
+```
 
 The compiled binaries will be saved in the `bin` directory.
 

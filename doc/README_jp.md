@@ -29,29 +29,42 @@ LocalSend Goは、Go言語で実装されたLocalSendプロトコルのコマン
 
 ## インストール
 
-### パッケージマネージャーから
+下記のワンライナーは [GitHub Releases](https://github.com/tingkai-c/localsend-cli/releases/latest) からビルド済みバイナリをダウンロードし、SHA-256 を検証して `PATH` に配置します。**Go のインストールは不要です**。
 
-#### Arch Linux
-> ⚠️ 注意：archパッケージはまだバージョン1.1.0です
+### Linux と macOS
 
 ```bash
-yay -Syy
-yay -S localsend-go
+curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh
 ```
 
-### ソースからビルド
+環境変数で挙動を調整できます：`VERSION=v1.2.6`、`INSTALL_DIR=$HOME/bin`、`BIN_NAME=lsc`。
 
-1. Go 1.22以上がインストールされていることを確認
-2. リポジトリをクローン
-   ```bash
-   git clone https://github.com/meowrain/localsend_cli.git
-   cd localsend_cli
-   ```
+### Windows (PowerShell)
 
-3. ビルド
-   ```bash
-   make build
-   ```
+```powershell
+irm https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.ps1 | iex
+```
+
+`%LOCALAPPDATA%\Programs\localsend-cli` にインストールし、ユーザー `PATH` に追加します（管理者権限不要）。
+
+### 手動ダウンロード
+
+[最新リリース](https://github.com/tingkai-c/localsend-cli/releases/latest) からお使いの OS / アーキテクチャ向けのアーカイブ（命名規則: `localsend-cli_<version>_<os>_<arch>.tar.gz` または `.zip`）を取得し、`checksums.txt` で検証してから展開、`localsend-cli` を `PATH` に置いてください。
+
+### Arch Linux (AUR)
+
+```bash
+yay -S localsend-cli
+```
+
+### ソースからビルド（Go 1.22+ が必要）
+
+```bash
+go install github.com/tingkai-c/localsend-cli@latest
+# あるいは
+git clone https://github.com/tingkai-c/localsend-cli.git
+cd localsend-cli && make build
+```
 
 コンパイルされたバイナリは `bin` ディレクトリに保存されます。
 
