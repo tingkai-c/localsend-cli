@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tingkai-c/localsend-tui/internal/models"
+	"github.com/tingkai-c/localsend-cli/internal/models"
 
 	bubbletea "github.com/charmbracelet/bubbletea"
 )

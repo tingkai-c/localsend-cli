@@ -1,4 +1,4 @@
-module github.com/tingkai-c/localsend-tui
+module github.com/tingkai-c/localsend-cli
 
 go 1.22
 

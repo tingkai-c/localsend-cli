@@ -2,12 +2,12 @@
 # Upstream: meowrain <meowrain@126.com>
 # Contributor: ilius <saeedgnu@riseup.net>
 
-pkgname=localsend-tui
+pkgname=localsend-cli
 pkgver=1.2.5
 pkgrel=1
 pkgdesc="CLI implementation of LocalSend protocol in Go (HTTPS-enabled fork)"
 arch=('x86_64' 'aarch64' 'armv7h' 'riscv64')
-url="https://github.com/tingkai-c/localsend-tui"
+url="https://github.com/tingkai-c/localsend-cli"
 license=('MIT')
 depends=('glibc')
 makedepends=('go')
@@ -17,7 +17,7 @@ sha256sums=('48d6b94b7cbcf6b07400c7293401a0d329e15c6ab1f3493e31363a5525e73b00')
 
 build() {
   cd "$pkgname-$pkgver"
-  go build -o "$pkgname" "cmd/main.go"
+  go build -o "$pkgname" .
 }
 
 package() {

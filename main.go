@@ -14,14 +14,14 @@ import (
 
 	bubbletea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tingkai-c/localsend-tui/internal/config"
-	"github.com/tingkai-c/localsend-tui/internal/discovery"
-	"github.com/tingkai-c/localsend-tui/internal/discovery/shared"
-	"github.com/tingkai-c/localsend-tui/internal/handlers"
-	"github.com/tingkai-c/localsend-tui/internal/pkg/server"
-	"github.com/tingkai-c/localsend-tui/internal/utils/cert"
-	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
-	"github.com/tingkai-c/localsend-tui/static"
+	"github.com/tingkai-c/localsend-cli/internal/config"
+	"github.com/tingkai-c/localsend-cli/internal/discovery"
+	"github.com/tingkai-c/localsend-cli/internal/discovery/shared"
+	"github.com/tingkai-c/localsend-cli/internal/handlers"
+	"github.com/tingkai-c/localsend-cli/internal/pkg/server"
+	"github.com/tingkai-c/localsend-cli/internal/utils/cert"
+	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
+	"github.com/tingkai-c/localsend-cli/static"
 	qrcode "github.com/skip2/go-qrcode"
 )
 
@@ -383,11 +383,11 @@ func showUsage() {
 	fmt.Println("Options:")
 	fmt.Println("  --help              Display this help information")
 	fmt.Println("  --port=<number>     Specify server port (default: 53317)")
-	fmt.Println("  --output-dir=<path> Directory for received files (default: ~/Downloads/localsend-tui)")
+	fmt.Println("  --output-dir=<path> Directory for received files (default: ~/Downloads/localsend-cli)")
 	fmt.Println("  --device-name=<s>   Device alias broadcast over the network")
 	fmt.Println("")
 	fmt.Println("  Config file: " + config.ConfigPath())
-	fmt.Println("  Env vars:    LOCALSEND_TUI_PORT, LOCALSEND_TUI_OUTPUT_DIR, LOCALSEND_TUI_DEVICE_NAME")
+	fmt.Println("  Env vars:    LOCALSEND_CLI_PORT, LOCALSEND_CLI_OUTPUT_DIR, LOCALSEND_CLI_DEVICE_NAME")
 	fmt.Println("  Precedence:  flag > env > config file > built-in default")
 }
 
@@ -402,8 +402,8 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 
 	// flag.Args() returns the positional arguments left after flag parsing,
 	// so commands work whether flags come before or after the mode keyword
-	// (e.g. `localsend-tui --port=12345 receive` and
-	// `localsend-tui receive --port=12345` are both accepted).
+	// (e.g. `localsend-cli --port=12345 receive` and
+	// `localsend-cli receive --port=12345` are both accepted).
 	args := flag.Args()
 	if len(args) == 0 {
 		return
@@ -462,9 +462,9 @@ func applyFlagOverrides() {
 // in environments where UserConfigDir is not writable.
 func certDir() string {
 	if base, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(base, "localsend-tui")
+		return filepath.Join(base, "localsend-cli")
 	}
-	return ".localsend-tui"
+	return ".localsend-cli"
 }
 
 func main() {

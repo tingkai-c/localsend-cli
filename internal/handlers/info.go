@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
+	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 
-	"github.com/tingkai-c/localsend-tui/internal/discovery/shared"
+	"github.com/tingkai-c/localsend-cli/internal/discovery/shared"
 )
 
 func GetInfoHandler(w http.ResponseWriter, r *http.Request) {

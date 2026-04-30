@@ -2,4 +2,4 @@ bin/
 !debian/usr/local/bin/
 uploads/
 .omc/
-/localsend-tui
+/localsend-cli

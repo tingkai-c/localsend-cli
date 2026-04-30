@@ -76,7 +76,7 @@ func generate() (tls.Certificate, string, error) {
 	now := time.Now()
 	template := x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "localsend-tui"},
+		Subject:               pkix.Name{CommonName: "localsend-cli"},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(validity),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

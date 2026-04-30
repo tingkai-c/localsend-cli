@@ -12,13 +12,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tingkai-c/localsend-tui/internal/config"
-	"github.com/tingkai-c/localsend-tui/internal/discovery"
-	"github.com/tingkai-c/localsend-tui/internal/discovery/shared"
-	"github.com/tingkai-c/localsend-tui/internal/models"
-	"github.com/tingkai-c/localsend-tui/internal/tui"
-	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
-	"github.com/tingkai-c/localsend-tui/internal/utils/sha256"
+	"github.com/tingkai-c/localsend-cli/internal/config"
+	"github.com/tingkai-c/localsend-cli/internal/discovery"
+	"github.com/tingkai-c/localsend-cli/internal/discovery/shared"
+	"github.com/tingkai-c/localsend-cli/internal/models"
+	"github.com/tingkai-c/localsend-cli/internal/tui"
+	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
+	"github.com/tingkai-c/localsend-cli/internal/utils/sha256"
 	"github.com/schollz/progressbar/v3"
 )
 

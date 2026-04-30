@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tingkai-c/localsend-tui/internal/config"
-	"github.com/tingkai-c/localsend-tui/internal/models"
+	"github.com/tingkai-c/localsend-cli/internal/config"
+	"github.com/tingkai-c/localsend-cli/internal/models"
 
-	"github.com/tingkai-c/localsend-tui/internal/utils/clipboard"
-	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
+	"github.com/tingkai-c/localsend-cli/internal/utils/clipboard"
+	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 	"github.com/schollz/progressbar/v3"
 )
 

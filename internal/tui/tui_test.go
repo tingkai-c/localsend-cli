@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tingkai-c/localsend-tui/internal/models"
+	"github.com/tingkai-c/localsend-cli/internal/models"
 )
 
 // TestSelectDevice 测试 SelectDevice 函数

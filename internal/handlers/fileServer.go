@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tingkai-c/localsend-tui/internal/config"
-	"github.com/tingkai-c/localsend-tui/templates"
+	"github.com/tingkai-c/localsend-cli/internal/config"
+	"github.com/tingkai-c/localsend-cli/templates"
 )
 
 // uploadDir returns the runtime upload directory. Resolved per-call so tests

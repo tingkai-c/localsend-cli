@@ -3,9 +3,9 @@ package discovery
 import (
 	"time"
 
-	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
+	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 
-	"github.com/tingkai-c/localsend-tui/internal/models"
+	"github.com/tingkai-c/localsend-cli/internal/models"
 )
 
 const (

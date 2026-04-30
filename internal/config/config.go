@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tingkai-c/localsend-tui/internal/utils/logger"
+	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 	"gopkg.in/yaml.v2"
 )
 
@@ -17,13 +17,13 @@ import (
 var embeddedConfig embed.FS
 
 const (
-	appDirName  = "localsend-tui"
+	appDirName  = "localsend-cli"
 	configFile  = "config.yaml"
 	defaultPort = 53317
 
-	EnvOutputDir  = "LOCALSEND_TUI_OUTPUT_DIR"
-	EnvPort       = "LOCALSEND_TUI_PORT"
-	EnvDeviceName = "LOCALSEND_TUI_DEVICE_NAME"
+	EnvOutputDir  = "LOCALSEND_CLI_OUTPUT_DIR"
+	EnvPort       = "LOCALSEND_CLI_PORT"
+	EnvDeviceName = "LOCALSEND_CLI_DEVICE_NAME"
 )
 
 type Config struct {

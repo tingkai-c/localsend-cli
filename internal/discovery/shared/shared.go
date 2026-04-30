@@ -3,9 +3,9 @@ package shared
 import (
 	"sync"
 
-	"github.com/tingkai-c/localsend-tui/internal/config"
-	"github.com/tingkai-c/localsend-tui/internal/models"
-	"github.com/tingkai-c/localsend-tui/internal/utils"
+	"github.com/tingkai-c/localsend-cli/internal/config"
+	"github.com/tingkai-c/localsend-cli/internal/models"
+	"github.com/tingkai-c/localsend-cli/internal/utils"
 )
 
 // 全局设备记录哈希表和互斥锁,Message信息

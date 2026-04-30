@@ -1,5 +1,5 @@
 # 项目名
-PROJECT_NAME := localsend-tui
+PROJECT_NAME := localsend-cli
 
 # 源代码目录
 SRC_DIR := .
