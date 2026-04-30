@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -9,6 +10,13 @@ import (
 
 // TestSelectDevice 测试 SelectDevice 函数
 func TestSelectDevice(t *testing.T) {
+	// SelectDevice opens /dev/tty for the bubbletea program; CI has no TTY.
+	if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err != nil {
+		t.Skip("no /dev/tty available, skipping interactive UI test")
+	} else {
+		f.Close()
+	}
+
 	// 创建一个设备更新 channel
 	updates := make(chan []models.SendModel)
 

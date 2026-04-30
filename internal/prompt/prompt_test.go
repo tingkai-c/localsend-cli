@@ -110,13 +110,20 @@ func TestAskApproval_Busy(t *testing.T) {
 	withTTY(t)
 	// Hold the lock by parking one prompt on a never-returning reader.
 	holdIn, _ := io.Pipe()
+	holdCtx, cancelHold := context.WithCancel(context.Background())
+	holderDone := make(chan struct{})
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		defer cancel()
-		_, _ = askWith(ctx, holdIn, &bytes.Buffer{}, "First", "fpA", files())
+		defer close(holderDone)
+		_, _ = askWith(holdCtx, holdIn, &bytes.Buffer{}, "First", "fpA", files())
 	}()
-	// Give the goroutine a moment to acquire the mutex.
-	time.Sleep(20 * time.Millisecond)
+	// Wait for the holder to acquire the mutex before issuing the second call.
+	for i := 0; i < 50; i++ {
+		if !promptMu.TryLock() {
+			break
+		}
+		promptMu.Unlock()
+		time.Sleep(2 * time.Millisecond)
+	}
 
 	d, err := askWith(context.Background(), strings.NewReader("y\n"), &bytes.Buffer{}, "Second", "fpB", files())
 	if !errors.Is(err, ErrBusy) {
@@ -125,6 +132,11 @@ func TestAskApproval_Busy(t *testing.T) {
 	if d != Reject {
 		t.Fatalf("decision must be Reject when busy, got %v", d)
 	}
+
+	// Make sure the holder goroutine fully exits before the test returns,
+	// otherwise t.Cleanup races with its read of isTTYFn.
+	cancelHold()
+	<-holderDone
 }
 
 func TestHumanBytes(t *testing.T) {
