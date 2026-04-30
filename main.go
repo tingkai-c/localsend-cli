@@ -19,6 +19,7 @@ import (
 	"github.com/tingkai-c/localsend-cli/internal/discovery/shared"
 	"github.com/tingkai-c/localsend-cli/internal/handlers"
 	"github.com/tingkai-c/localsend-cli/internal/pkg/server"
+	"github.com/tingkai-c/localsend-cli/internal/trust"
 	"github.com/tingkai-c/localsend-cli/internal/utils/cert"
 	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 	"github.com/tingkai-c/localsend-cli/static"
@@ -376,19 +377,24 @@ func ExitMode() {
 func showUsage() {
 	fmt.Println("Usage: <command> [arguments]")
 	fmt.Println("Commands:")
-	fmt.Println("  web                 Start Web mode")
-	fmt.Println("  send <file_path>    Start Send mode (file path required)")
-	fmt.Println("  receive             Start Receive mode")
-	fmt.Println("  help                Display this help information")
+	fmt.Println("  web                       Start Web mode")
+	fmt.Println("  send <file_path>          Start Send mode (file path required)")
+	fmt.Println("  receive                   Start Receive mode")
+	fmt.Println("  forget <alias|fingerprint> Remove a sender from the trust list")
+	fmt.Println("  trusted                   List trusted senders")
+	fmt.Println("  help                      Display this help information")
 	fmt.Println("Options:")
-	fmt.Println("  --help              Display this help information")
-	fmt.Println("  --port=<number>     Specify server port (default: 53317)")
-	fmt.Println("  --output-dir=<path> Directory for received files (default: ~/Downloads/localsend-cli)")
-	fmt.Println("  --device-name=<s>   Device alias broadcast over the network")
+	fmt.Println("  --help                    Display this help information")
+	fmt.Println("  --port=<number>           Specify server port (default: 53317)")
+	fmt.Println("  --output-dir=<path>       Directory for received files (default: ~/Downloads/localsend-cli)")
+	fmt.Println("  --device-name=<s>         Device alias broadcast over the network")
+	fmt.Println("  --quick-save              Auto-accept every incoming session (skip approval prompt)")
 	fmt.Println("")
-	fmt.Println("  Config file: " + config.ConfigPath())
-	fmt.Println("  Env vars:    LOCALSEND_CLI_PORT, LOCALSEND_CLI_OUTPUT_DIR, LOCALSEND_CLI_DEVICE_NAME")
-	fmt.Println("  Precedence:  flag > env > config file > built-in default")
+	fmt.Println("  Config file:  " + config.ConfigPath())
+	fmt.Println("  Trust file:   " + trust.Path())
+	fmt.Println("  Env vars:     LOCALSEND_CLI_PORT, LOCALSEND_CLI_OUTPUT_DIR,")
+	fmt.Println("                LOCALSEND_CLI_DEVICE_NAME, LOCALSEND_CLI_QUICK_SAVE")
+	fmt.Println("  Precedence:   flag > env > config file > built-in default")
 }
 
 func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
@@ -421,9 +427,60 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 		SendMode(args[1])
 	case "receive":
 		ReceiveMode()
+	case "forget":
+		if len(args) < 2 {
+			logger.Error("Need alias or fingerprint to forget")
+			ExitMode()
+		}
+		ForgetMode(args[1])
+	case "trusted":
+		ListTrustedMode()
 	case "help":
 		showUsage()
 		ExitMode()
+	}
+}
+
+// ForgetMode removes a sender from the trust list. Matching is by exact
+// alias (case-insensitive), exact fingerprint, or fingerprint prefix of
+// at least 8 chars.
+func ForgetMode(query string) {
+	if err := trust.Load(); err != nil {
+		logger.Errorf("Failed to load trust file: %v", err)
+		ExitMode()
+	}
+	removed, err := trust.Forget(query)
+	if err != nil {
+		logger.Errorf("Failed to update trust file: %v", err)
+		ExitMode()
+	}
+	if len(removed) == 0 {
+		fmt.Printf("No trusted sender matched %q.\n", query)
+		return
+	}
+	for _, e := range removed {
+		fmt.Printf("Forgot %s (%s)\n", e.Alias, e.Fingerprint)
+	}
+}
+
+// ListTrustedMode prints all currently-trusted senders.
+func ListTrustedMode() {
+	if err := trust.Load(); err != nil {
+		logger.Errorf("Failed to load trust file: %v", err)
+		ExitMode()
+	}
+	entries := trust.List()
+	if len(entries) == 0 {
+		fmt.Println("No trusted senders.")
+		return
+	}
+	fmt.Printf("Trusted senders (%s):\n", trust.Path())
+	for _, e := range entries {
+		alias := e.Alias
+		if alias == "" {
+			alias = "(no alias)"
+		}
+		fmt.Printf("  %s  %s  added %s\n", e.Fingerprint, alias, e.AddedAt.Format("2006-01-02"))
 	}
 }
 
@@ -431,12 +488,14 @@ var (
 	port       int
 	outputDir  string
 	deviceName string
+	quickSave  bool
 )
 
 func init() {
 	flag.IntVar(&port, "port", 53317, "Port to listen on")
 	flag.StringVar(&outputDir, "output-dir", "", "Directory for received files (overrides config)")
 	flag.StringVar(&deviceName, "device-name", "", "Device alias broadcast over the network (overrides config)")
+	flag.BoolVar(&quickSave, "quick-save", false, "Skip the approval prompt and auto-accept every incoming session (overrides config)")
 }
 
 // applyFlagOverrides copies any explicitly-set CLI flags onto the loaded
@@ -453,6 +512,8 @@ func applyFlagOverrides() {
 		case "device-name":
 			config.ConfigData.DeviceName = deviceName
 			config.ConfigData.NameOfDevice = deviceName
+		case "quick-save":
+			config.ConfigData.QuickSave = quickSave
 		}
 	})
 }
@@ -484,6 +545,29 @@ func main() {
 	flag.Usage = showUsage
 	flag.Parse()
 	applyFlagOverrides()
+
+	// Lightweight subcommands that only touch the trust file should exit
+	// without spinning up the cert + HTTPS server.
+	if args := flag.Args(); len(args) > 0 {
+		switch args[0] {
+		case "forget":
+			if len(args) < 2 {
+				logger.Error("Need alias or fingerprint to forget")
+				ExitMode()
+			}
+			ForgetMode(args[1])
+			return
+		case "trusted":
+			ListTrustedMode()
+			return
+		}
+	}
+
+	// Load the trust list so PrepareReceive can short-circuit prompts for
+	// previously-approved fingerprints.
+	if err := trust.Load(); err != nil {
+		logger.Errorf("Failed to load trust file %s: %v", trust.Path(), err)
+	}
 
 	// LocalSend v2 mandates HTTPS with self-signed certificates pinned by
 	// fingerprint. Generate or load a stable cert before starting the server

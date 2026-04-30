@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
@@ -24,12 +25,14 @@ const (
 	EnvOutputDir  = "LOCALSEND_CLI_OUTPUT_DIR"
 	EnvPort       = "LOCALSEND_CLI_PORT"
 	EnvDeviceName = "LOCALSEND_CLI_DEVICE_NAME"
+	EnvQuickSave  = "LOCALSEND_CLI_QUICK_SAVE"
 )
 
 type Config struct {
 	DeviceName   string `yaml:"device_name"`
 	Port         int    `yaml:"port"`
 	OutputDir    string `yaml:"output_dir"`
+	QuickSave    bool   `yaml:"quick_save"`
 	NameOfDevice string `yaml:"-"` // resolved at runtime from DeviceName or random fallback
 	Functions    struct {
 		HttpFileServer  bool `yaml:"http_file_server"`
@@ -123,6 +126,16 @@ func init() {
 	}
 	if v := os.Getenv(EnvDeviceName); v != "" {
 		ConfigData.DeviceName = v
+	}
+	if v := os.Getenv(EnvQuickSave); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			ConfigData.QuickSave = true
+		case "0", "false", "no", "off":
+			ConfigData.QuickSave = false
+		default:
+			logger.Debugf("Ignoring invalid %s=%q (expected boolean)", EnvQuickSave, v)
+		}
 	}
 
 	// Resolve runtime alias. Flag overrides (handled in main) may rewrite

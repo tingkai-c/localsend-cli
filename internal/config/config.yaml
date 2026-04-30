@@ -24,6 +24,17 @@
 # Override with --output-dir or LOCALSEND_CLI_OUTPUT_DIR.
 # output_dir: /var/lib/localsend
 
+# Skip the interactive y/n/a approval prompt on PrepareReceive and accept
+# every incoming session. Default false (secure-by-default). Headless
+# deployments must enable this OR rely on the trust list (see below) since
+# the prompt requires a TTY.
+# Override with --quick-save or LOCALSEND_CLI_QUICK_SAVE.
+# quick_save: false
+
+# Trusted senders (managed by the "Always" prompt answer and the
+# `localsend-cli forget <alias|fingerprint>` subcommand) live in
+# trusted.yaml alongside this file — do not edit there by hand.
+
 # Feature toggles. Both default to true.
 functions:
   http_file_server: true

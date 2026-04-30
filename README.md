@@ -84,6 +84,7 @@ The config file is auto-generated on first run at:
 | Device alias | `device_name` | `LOCALSEND_CLI_DEVICE_NAME` | `--device-name` | random `Adjective Noun` |
 | HTTPS port | `port` | `LOCALSEND_CLI_PORT` | `--port` | `53317` |
 | Output directory | `output_dir` | `LOCALSEND_CLI_OUTPUT_DIR` | `--output-dir` | `~/Downloads/localsend-cli` |
+| Quick Save | `quick_save` | `LOCALSEND_CLI_QUICK_SAVE` | `--quick-save` | `false` |
 
 Examples:
 
@@ -96,6 +97,38 @@ $EDITOR ~/.config/localsend-cli/config.yaml
 
 # Quick override
 localsend-cli --output-dir=/tmp/inbox --port=12345 receive
+```
+
+## Approval prompt
+
+`receive` mode is **secure-by-default**: every incoming session blocks on an interactive prompt before any file is written.
+
+```
+[localsend] Incoming transfer
+  From:        Alice's Phone (fingerprint a1b2c3d4e5f6…)
+  Files:       2, total 1.4 MiB
+  - report.pdf (1.2 MiB)
+  - notes.txt (217 KiB)
+Accept files? [y]es / [n]o / [a]lways:
+```
+
+- `y` accepts this session.
+- `n` rejects (sender sees `403`).
+- `a` accepts and persists the sender's TLS fingerprint to `<config-dir>/localsend-cli/trusted.yaml`. Future sessions from the same fingerprint skip the prompt.
+- No answer within **60 seconds** → reject (sender sees `403`).
+- A second incoming session while the prompt is up gets `409 Blocked by another session`.
+
+For headless / daemon use, the prompt cannot run (no TTY) so unrecognised senders are rejected immediately. Enable `quick_save: true` (or set `LOCALSEND_CLI_QUICK_SAVE=1`, or pass `--quick-save`) to auto-accept everything — equivalent to the pre-1.3 behavior.
+
+Manage the trust list:
+
+```bash
+# List currently-trusted senders
+localsend-cli trusted
+
+# Forget by alias (case-insensitive), full fingerprint, or fingerprint prefix (>= 8 chars)
+localsend-cli forget "Alice's Phone"
+localsend-cli forget a1b2c3d4
 ```
 
 

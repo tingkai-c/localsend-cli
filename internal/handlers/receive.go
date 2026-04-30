@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +15,8 @@ import (
 
 	"github.com/tingkai-c/localsend-cli/internal/config"
 	"github.com/tingkai-c/localsend-cli/internal/models"
+	"github.com/tingkai-c/localsend-cli/internal/prompt"
+	"github.com/tingkai-c/localsend-cli/internal/trust"
 
 	"github.com/tingkai-c/localsend-cli/internal/utils/clipboard"
 	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
@@ -34,6 +38,12 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Infof("Received request from %s,device is %s", req.Info.Alias, req.Info.DeviceModel)
+
+	if !authorizeIncoming(req.Info.Alias, req.Info.Fingerprint, req.Files) {
+		// authorizeIncoming logs the reason; HTTP status was set there.
+		writeAuthError(w, lastAuthErr())
+		return
+	}
 
 	sessionMutex.Lock()
 	sessionIDCounter++
@@ -60,6 +70,103 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// authErr is set by authorizeIncoming so PrepareReceive can map the failure
+// to the correct HTTP status without re-checking conditions inline. It's
+// scoped to a single request via lastAuthErrKey on the goroutine — but Go
+// has no such thing, so we just stash it on a per-request basis through a
+// package-level value protected by the prompt mutex implicitly. This is
+// fine: only one prompt may be active at a time, so the "in flight" auth
+// failure is unique while it lives.
+var (
+	authErrMu sync.Mutex
+	authErr   error
+)
+
+func setAuthErr(err error) {
+	authErrMu.Lock()
+	authErr = err
+	authErrMu.Unlock()
+}
+
+func lastAuthErr() error {
+	authErrMu.Lock()
+	defer authErrMu.Unlock()
+	err := authErr
+	authErr = nil
+	return err
+}
+
+func writeAuthError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, prompt.ErrBusy):
+		http.Error(w, "blocked by another session", http.StatusConflict)
+	case errors.Is(err, prompt.ErrTimeout):
+		http.Error(w, "approval timed out", http.StatusForbidden)
+	case errors.Is(err, prompt.ErrNoTTY):
+		http.Error(w, "receiver requires Quick Save for headless use", http.StatusForbidden)
+	default:
+		http.Error(w, "rejected", http.StatusForbidden)
+	}
+}
+
+// authorizeIncoming decides whether the session is allowed in. Order of
+// precedence (each step short-circuits acceptance):
+//  1. Quick Save bypasses every check.
+//  2. A previously-trusted fingerprint bypasses the prompt.
+//  3. No TTY → reject without prompting (avoids hanging headless servers).
+//  4. Otherwise prompt the user; persist the fingerprint on "Always".
+func authorizeIncoming(alias, fingerprint string, files map[string]models.FileInfo) bool {
+	if config.ConfigData.QuickSave {
+		return true
+	}
+	if trust.IsTrusted(fingerprint) {
+		logger.Infof("Auto-accepting trusted fingerprint %s (%s)", shortFP(fingerprint), alias)
+		return true
+	}
+	if !prompt.IsTTY() {
+		logger.Warn("Rejecting incoming session: stdin is not a TTY and quick_save is OFF. Set quick_save: true (or trust this sender once interactively) to receive on this host.")
+		setAuthErr(prompt.ErrNoTTY)
+		return false
+	}
+
+	summaries := make([]prompt.FileSummary, 0, len(files))
+	for _, f := range files {
+		summaries = append(summaries, prompt.FileSummary{Name: f.FileName, Size: f.Size})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), prompt.DefaultTimeout)
+	defer cancel()
+	decision, err := prompt.AskApproval(ctx, alias, fingerprint, summaries)
+	if err != nil {
+		logger.Infof("Approval prompt error: %v", err)
+		setAuthErr(err)
+		return false
+	}
+	switch decision {
+	case prompt.AcceptAlways:
+		if err := trust.Add(fingerprint, alias); err != nil {
+			// Persisting failed but the user said yes; honor the answer for
+			// this session and warn so they can investigate.
+			logger.Errorf("Failed to persist trust for %s: %v", alias, err)
+		} else {
+			logger.Infof("Trusted %s (%s) for future sessions", alias, shortFP(fingerprint))
+		}
+		return true
+	case prompt.Accept:
+		return true
+	default:
+		setAuthErr(errors.New("user rejected"))
+		return false
+	}
+}
+
+func shortFP(fp string) string {
+	if len(fp) > 12 {
+		return fp[:12] + "…"
+	}
+	return fp
 }
 
 func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
