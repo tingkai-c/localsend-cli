@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tingkai-c/localsend-tui/internal/config"
 	"github.com/tingkai-c/localsend-tui/internal/models"
 
 	"github.com/tingkai-c/localsend-tui/internal/utils/clipboard"
@@ -80,7 +81,7 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 生成文件路径，保留文件扩展名
-	filePath := filepath.Join("uploads", fileName)
+	filePath := filepath.Join(config.ConfigData.OutputDir, fileName)
 	// 创建文件夹（如果不存在）
 	dir := filepath.Dir(filePath)
 	err := os.MkdirAll(dir, os.ModePerm)

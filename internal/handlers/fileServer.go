@@ -7,10 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tingkai-c/localsend-tui/internal/config"
 	"github.com/tingkai-c/localsend-tui/templates"
 )
 
-const uploadDir = "./uploads"
+// uploadDir returns the runtime upload directory. Resolved per-call so tests
+// (and any future hot-reload) see the current config value rather than a
+// snapshot taken at package init time.
+func uploadDir() string { return config.ConfigData.OutputDir }
 
 func GetFilesFromDir(dir string) ([]os.DirEntry, error) {
 	entries, err := os.ReadDir(dir)
@@ -22,11 +26,11 @@ func GetFilesFromDir(dir string) ([]os.DirEntry, error) {
 
 func FileServerHandler(w http.ResponseWriter, r *http.Request) {
 	file := strings.TrimPrefix(r.URL.Path, "/uploads/")
-	http.ServeFile(w, r, filepath.Join(uploadDir, file))
+	http.ServeFile(w, r, filepath.Join(uploadDir(), file))
 }
 
 func IndexFileHandler(w http.ResponseWriter, r *http.Request) {
-	dirPath := filepath.Join(uploadDir, strings.TrimPrefix(r.URL.Path, "/uploads/"))
+	dirPath := filepath.Join(uploadDir(), strings.TrimPrefix(r.URL.Path, "/uploads/"))
 
 	info, err := os.Stat(dirPath)
 	if os.IsNotExist(err) {

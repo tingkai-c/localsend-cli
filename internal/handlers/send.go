@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tingkai-c/localsend-tui/internal/config"
 	"github.com/tingkai-c/localsend-tui/internal/discovery"
 	"github.com/tingkai-c/localsend-tui/internal/discovery/shared"
 	"github.com/tingkai-c/localsend-tui/internal/models"
@@ -297,8 +298,8 @@ func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uploadDir := "./uploads"    // 基础上传目录
-	finalUploadDir := uploadDir // 默认最终上传目录
+	uploadDir := config.ConfigData.OutputDir // 基础上传目录
+	finalUploadDir := uploadDir              // 默认最终上传目录
 
 	// 如果前端传递了目录名且不为空，才创建以目录名命名的子目录
 	if uploadedDirName != "" {

@@ -1,3 +1,30 @@
+# localsend-tui configuration
+#
+# This file is auto-generated on first run at:
+#   $XDG_CONFIG_HOME/localsend-tui/config.yaml
+#   (typically ~/.config/localsend-tui/config.yaml)
+#
+# Precedence (highest wins):
+#   command-line flags > environment variables > this file > built-in defaults
+#
+# Edit and uncomment any value below to override the default.
+
+# Device alias broadcast over the network. Other LocalSend peers see this
+# in their device list. If empty or missing, a random adjective+noun
+# (e.g. "Brave Tiger") is generated each run.
+# Override with --device-name or LOCALSEND_TUI_DEVICE_NAME.
+# device_name: "My LocalSend Server"
+
+# HTTPS port the server listens on (default: 53317).
+# Override with --port or LOCALSEND_TUI_PORT.
+# port: 53317
+
+# Directory where received files are saved
+# (default: $HOME/Downloads/localsend-tui).
+# Override with --output-dir or LOCALSEND_TUI_OUTPUT_DIR.
+# output_dir: /var/lib/localsend
+
+# Feature toggles. Both default to true.
 functions:
   http_file_server: true
   local_send_server: true

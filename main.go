@@ -315,9 +315,9 @@ func (m model) View() string {
 }
 
 func WebServerMode(httpServer *http.ServeMux, port int) {
-	err := os.MkdirAll("uploads", 0o755)
+	err := os.MkdirAll(config.ConfigData.OutputDir, 0o755)
 	if err != nil {
-		logger.Errorf("Failed to create uploads directory: %v", err)
+		logger.Errorf("Failed to create uploads directory %s: %v", config.ConfigData.OutputDir, err)
 		return
 	}
 	if config.ConfigData.Functions.HttpFileServer {
@@ -349,13 +349,13 @@ func WebServerMode(httpServer *http.ServeMux, port int) {
 }
 
 func ReceiveMode() {
-	err := os.MkdirAll("uploads", 0o755)
+	err := os.MkdirAll(config.ConfigData.OutputDir, 0o755)
 	if err != nil {
-		logger.Errorf("Failed to create uploads directory: %v", err)
+		logger.Errorf("Failed to create uploads directory %s: %v", config.ConfigData.OutputDir, err)
 		return
 	}
 	discovery.ListenAndStartBroadcasts(nil)
-	logger.Info("Waiting to receive files...")
+	logger.Infof("Waiting to receive files (output: %s)...", config.ConfigData.OutputDir)
 	select {}
 }
 
@@ -371,59 +371,90 @@ func ExitMode() {
 	os.Exit(0)
 }
 
-func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
-	showHelp := func() {
-		fmt.Println("Usage: <command> [arguments]")
-		fmt.Println("Commands:")
-		fmt.Println("  web                 Start Web mode")
-		fmt.Println("  send <file_path>    Start Send mode (file path required)")
-		fmt.Println("  receive             Start Receive mode")
-		fmt.Println("  help                Display this help information")
-		fmt.Println("Options:")
-		fmt.Println("  --help              Display this help information")
-		fmt.Println("  --port=<number>     Specify server port (default: 53317)")
-	}
-	flag.Usage = showHelp
-	// 解析标准flag参数
-	flag.Parse()
+// showUsage prints the CLI help. Defined at package scope so it can be wired
+// into flag.Usage before flag.Parse runs.
+func showUsage() {
+	fmt.Println("Usage: <command> [arguments]")
+	fmt.Println("Commands:")
+	fmt.Println("  web                 Start Web mode")
+	fmt.Println("  send <file_path>    Start Send mode (file path required)")
+	fmt.Println("  receive             Start Receive mode")
+	fmt.Println("  help                Display this help information")
+	fmt.Println("Options:")
+	fmt.Println("  --help              Display this help information")
+	fmt.Println("  --port=<number>     Specify server port (default: 53317)")
+	fmt.Println("  --output-dir=<path> Directory for received files (default: ~/Downloads/localsend-tui)")
+	fmt.Println("  --device-name=<s>   Device alias broadcast over the network")
+	fmt.Println("")
+	fmt.Println("  Config file: " + config.ConfigPath())
+	fmt.Println("  Env vars:    LOCALSEND_TUI_PORT, LOCALSEND_TUI_OUTPUT_DIR, LOCALSEND_TUI_DEVICE_NAME")
+	fmt.Println("  Precedence:  flag > env > config file > built-in default")
+}
 
+func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 	// 检查是否有 --help 参数
 	for _, arg := range os.Args {
 		if arg == "--help" || arg == "-h" {
-			showHelp()
+			showUsage()
 			ExitMode()
 		}
 	}
 
-	if len(os.Args) > 1 {
-		*flagOpen = true
-		mode := os.Args[1]
+	// flag.Args() returns the positional arguments left after flag parsing,
+	// so commands work whether flags come before or after the mode keyword
+	// (e.g. `localsend-tui --port=12345 receive` and
+	// `localsend-tui receive --port=12345` are both accepted).
+	args := flag.Args()
+	if len(args) == 0 {
+		return
+	}
 
-		switch mode {
-		case "web":
-			WebServerMode(httpServer, port)
-		case "send":
-			filePath := ""
-			if len(os.Args) > 2 {
-				filePath = os.Args[2]
-				SendMode(filePath)
-			} else {
-				logger.Error("Need file path")
-				ExitMode()
-			}
-		case "receive":
-			ReceiveMode()
-		case "help":
-			showHelp()
+	*flagOpen = true
+	switch args[0] {
+	case "web":
+		WebServerMode(httpServer, port)
+	case "send":
+		if len(args) < 2 {
+			logger.Error("Need file path")
 			ExitMode()
 		}
+		SendMode(args[1])
+	case "receive":
+		ReceiveMode()
+	case "help":
+		showUsage()
+		ExitMode()
 	}
 }
 
-var port int
+var (
+	port       int
+	outputDir  string
+	deviceName string
+)
 
 func init() {
 	flag.IntVar(&port, "port", 53317, "Port to listen on")
+	flag.StringVar(&outputDir, "output-dir", "", "Directory for received files (overrides config)")
+	flag.StringVar(&deviceName, "device-name", "", "Device alias broadcast over the network (overrides config)")
+}
+
+// applyFlagOverrides copies any explicitly-set CLI flags onto the loaded
+// config so the precedence chain (flag > env > file > default) is honored.
+// flag.Visit only iterates flags that were actually passed on the command
+// line, which is exactly the signal we need.
+func applyFlagOverrides() {
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "port":
+			config.ConfigData.Port = port
+		case "output-dir":
+			config.ConfigData.OutputDir = outputDir
+		case "device-name":
+			config.ConfigData.DeviceName = deviceName
+			config.ConfigData.NameOfDevice = deviceName
+		}
+	})
 }
 
 // certDir returns the directory where the TLS certificate and key are
@@ -447,6 +478,13 @@ func main() {
 	}()
 	logger.InitLogger()
 
+	// Parse flags up front so config values (port, output dir, device name)
+	// are settled before anything reads them. flagParse() below still runs
+	// for command dispatch (web/send/receive); flag.Parse is idempotent.
+	flag.Usage = showUsage
+	flag.Parse()
+	applyFlagOverrides()
+
 	// LocalSend v2 mandates HTTPS with self-signed certificates pinned by
 	// fingerprint. Generate or load a stable cert before starting the server
 	// and the discovery broadcast so both advertise the same fingerprint.
@@ -455,7 +493,8 @@ func main() {
 		log.Fatalf("Failed to prepare TLS certificate: %v", err)
 	}
 	shared.Message.Fingerprint = fp
-	shared.Message.Port = port
+	shared.Message.Port = config.ConfigData.Port
+	shared.Message.Alias = config.ConfigData.NameOfDevice
 
 	// Start HTTPS server
 	httpServer := server.New()
@@ -472,7 +511,7 @@ func main() {
 		httpServer.HandleFunc("/api/localsend/v1/info", handlers.GetInfoHandler)
 	}
 	go func() {
-		addr := ":" + fmt.Sprintf("%d", port)
+		addr := ":" + fmt.Sprintf("%d", config.ConfigData.Port)
 		logger.Info("Server started at " + addr + " (https, fingerprint=" + fp + ")")
 		srv := &http.Server{
 			Addr:      addr,
@@ -484,7 +523,7 @@ func main() {
 		}
 	}()
 	// 参数解析
-	flagParse(httpServer, port, &flagOpen)
+	flagParse(httpServer, config.ConfigData.Port, &flagOpen)
 
 	if !flagOpen {
 		// Run Bubble Tea program
