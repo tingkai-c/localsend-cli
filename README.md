@@ -1,6 +1,6 @@
 <div align="center">
-    <h1>LocalSend TUI</h1>
-    <h4>✨ A headless / TUI LocalSend client written in Go ✨</h4>
+    <h1>LocalSend CLI</h1>
+    <h4>✨ A headless / CLI LocalSend client written in Go ✨</h4>
 </div>
 
 > Fork of [meowrain/localsend-go](https://github.com/meowrain/localsend-go) with HTTPS support and a stable certificate fingerprint, so the official LocalSend mobile/desktop apps can connect with their default (encrypted) settings.
