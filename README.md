@@ -38,6 +38,35 @@ cd localsend_cli
 make build
 ```
 
+## Configuration
+
+Settings are resolved with the precedence **command-line flag > environment variable > config file > built-in default**.
+
+The config file is auto-generated on first run at:
+
+- Linux / WSL: `~/.config/localsend-tui/config.yaml`
+- macOS: `~/Library/Application Support/localsend-tui/config.yaml`
+- Windows: `%AppData%\localsend-tui\config.yaml`
+
+| Setting | Config key | Env var | Flag | Default |
+|---|---|---|---|---|
+| Device alias | `device_name` | `LOCALSEND_TUI_DEVICE_NAME` | `--device-name` | random `Adjective Noun` |
+| HTTPS port | `port` | `LOCALSEND_TUI_PORT` | `--port` | `53317` |
+| Output directory | `output_dir` | `LOCALSEND_TUI_OUTPUT_DIR` | `--output-dir` | `~/Downloads/localsend-tui` |
+
+Examples:
+
+```bash
+# One-off: receive into a specific dir without editing the config
+LOCALSEND_TUI_OUTPUT_DIR=/tmp/inbox localsend-tui receive
+
+# Persistent: edit the config file and uncomment the keys you want to set
+$EDITOR ~/.config/localsend-tui/config.yaml
+
+# Quick override
+localsend-tui --output-dir=/tmp/inbox --port=12345 receive
+```
+
 
 ## Star History
 
