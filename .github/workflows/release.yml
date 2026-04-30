@@ -1,77 +1,93 @@
-name: Build and Release
+name: Release
 
 on:
   push:
     tags:
       - "v*"
 
-jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
+permissions:
+  contents: write
 
+jobs:
   build:
-    needs: create-release
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        platform:
-          [
-            linux/amd64,
-            linux/arm64,
-            darwin/amd64,
-            darwin/arm64,
-            windows/amd64,
-            windows/arm64,
-          ]
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: linux,   goarch: riscv64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version: 1.22
+          go-version-file: go.mod
+          cache: true
 
-      - name: Get OS and ARCH
-        id: platform
+      - name: Build and package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
         run: |
-          echo "GOOS=$(echo ${{ matrix.platform }} | cut -d '/' -f1)" >> $GITHUB_OUTPUT
-          echo "GOARCH=$(echo ${{ matrix.platform }} | cut -d '/' -f2)" >> $GITHUB_OUTPUT
-          FORMATTED_PLATFORM=$(echo "${{ matrix.platform }}" | sed 's/\//-/g')
-          echo "FORMATTED_PLATFORM=$FORMATTED_PLATFORM" >> $GITHUB_OUTPUT
-          if [[ "${{ matrix.platform }}" == *"windows"* ]]; then
-            echo "EXT=.exe" >> $GITHUB_OUTPUT
+          set -eu
+          ref="${GITHUB_REF_NAME#v}"
+          stage="$(mktemp -d)"
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+
+          go build -trimpath \
+            -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o "$stage/localsend-cli${ext}" .
+          chmod 755 "$stage/localsend-cli${ext}"
+          cp LICENSE README.md "$stage/"
+
+          mkdir -p dist
+          base="localsend-cli_${ref}_${GOOS}_${GOARCH}"
+          if [ "$GOOS" = "windows" ]; then
+            (cd "$stage" && zip -q -r "$GITHUB_WORKSPACE/dist/${base}.zip" .)
           else
-            echo "EXT=" >> $GITHUB_OUTPUT
+            tar -C "$stage" -czf "dist/${base}.tar.gz" .
           fi
 
-      - name: Build
-        env:
-          GOOS: ${{ steps.platform.outputs.GOOS }}
-          GOARCH: ${{ steps.platform.outputs.GOARCH }}
-        run: |
-          mkdir -p ./artifacts
-          go build -o "./artifacts/localsend-cli-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}" .
-
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./artifacts/localsend-cli-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
-          asset_name: localsend-cli-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
-          asset_content_type: application/octet-stream
+          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect archives and compute checksums
+        run: |
+          set -eu
+          mkdir -p out
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) \
+            -exec mv {} out/ \;
+          ( cd out && sha256sum -- * | sort -k2 > checksums.txt )
+          ls -la out
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            out/*.tar.gz
+            out/*.zip
+            out/checksums.txt
