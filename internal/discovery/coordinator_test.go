@@ -104,16 +104,29 @@ func assertDeviceUpdate(t *testing.T, updates <-chan []models.SendModel, want []
 }
 
 func TestListenAndStartBroadcastsAlias(t *testing.T) {
-	var udpCalls, httpCalls, startCalls int32
+	var udpCalls, httpCalls, startCalls atomic.Int32
 	updates := make(chan []models.SendModel, 1)
 
-	coord := defaultDiscoveryCoordinator
-	coord.Subscribe(updates)
-	time.Sleep(20 * time.Millisecond)
+	previous := defaultDiscoveryCoordinator
+	defaultDiscoveryCoordinator = newDiscoveryCoordinator(
+		func(chan<- []models.SendModel) {
+			udpCalls.Add(1)
+		},
+		func(chan<- []models.SendModel) {
+			httpCalls.Add(1)
+		},
+		func() {
+			startCalls.Add(1)
+		},
+	)
+	defer func() {
+		defaultDiscoveryCoordinator = previous
+	}()
 
-	coord.mu.Lock()
-	if coord.updates == nil {
-		t.Fatal("expected updates channel to be initialized")
-	}
-	coord.mu.Unlock()
+	ListenAndStartBroadcasts(updates)
+	ListenAndStartBroadcasts(nil)
+
+	waitForAtomicInt32(t, &udpCalls, 1)
+	waitForAtomicInt32(t, &httpCalls, 1)
+	waitForAtomicInt32(t, &startCalls, 1)
 }
