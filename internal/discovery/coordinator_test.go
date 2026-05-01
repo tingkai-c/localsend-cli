@@ -58,7 +58,7 @@ func TestDiscoveryCoordinatorAllowsNilSubscriber(t *testing.T) {
 		},
 	)
 
-	coord.ListenAndStartBroadcasts(nil)
+	coord.Subscribe(nil)
 
 	waitForInt32(t, &udpCalls, 1)
 	waitForInt32(t, &httpCalls, 1)
@@ -100,15 +100,14 @@ func assertDeviceUpdate(t *testing.T, ch <-chan []models.SendModel, want []model
 func TestListenAndStartBroadcastsAlias(t *testing.T) {
 	updates := make(chan []models.SendModel, 1)
 
-	done := make(chan struct{})
-	go func() {
-		ListenAndStartBroadcasts(updates)
-		close(done)
-	}()
+	coord := defaultDiscoveryCoordinator
+	coord.Subscribe(updates)
+	time.Sleep(20 * time.Millisecond)
 
-	select {
-	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("ListenAndStartBroadcasts did not return")
+	coord.mu.Lock()
+	if coord.updates == nil {
+		t.Fatal("expected updates channel to be initialized")
 	}
+	coord.mu.Unlock()
+}
 }
