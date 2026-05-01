@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 
 	bubbletea "github.com/charmbracelet/bubbletea"
@@ -20,7 +19,6 @@ import (
 	"github.com/tingkai-c/localsend-cli/internal/discovery"
 	"github.com/tingkai-c/localsend-cli/internal/discovery/shared"
 	"github.com/tingkai-c/localsend-cli/internal/handlers"
-	"github.com/tingkai-c/localsend-cli/internal/models"
 	"github.com/tingkai-c/localsend-cli/internal/pkg/server"
 	"github.com/tingkai-c/localsend-cli/internal/trust"
 	"github.com/tingkai-c/localsend-cli/internal/utils/cert"

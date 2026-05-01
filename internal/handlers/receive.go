@@ -195,12 +195,6 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer func() {
-		receiveSessionsMu.Lock()
-		delete(receiveSessions, sessionID)
-		receiveSessionsMu.Unlock()
-	}()
-
 	filePath := filepath.Join(config.ConfigData.OutputDir, fileName)
 	dir := filepath.Dir(filePath)
 	err := os.MkdirAll(dir, os.ModePerm)
@@ -289,5 +283,15 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Success("File saved to:", filePath)
+	receiveSessionsMu.Lock()
+	sessionData = receiveSessions[sessionID]
+	delete(sessionData.tokens, fileID)
+	delete(sessionData.fileNames, fileID)
+	if len(sessionData.tokens) == 0 {
+		delete(receiveSessions, sessionID)
+	} else {
+		receiveSessions[sessionID] = sessionData
+	}
+	receiveSessionsMu.Unlock()
 	w.WriteHeader(http.StatusOK)
 }
