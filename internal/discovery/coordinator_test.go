@@ -111,4 +111,3 @@ func TestListenAndStartBroadcastsAlias(t *testing.T) {
 	}
 	coord.mu.Unlock()
 }
-}
