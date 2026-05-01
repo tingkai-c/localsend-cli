@@ -92,6 +92,64 @@ verify_sha256() {
   actual:   $actual"
 }
 
+
+print_command_refresh_hint() {
+    # New executables may not be immediately visible in shells with command caches.
+    shell_name=""
+    if [ -n "${SHELL:-}" ]; then
+        shell_name=$(basename "$SHELL")
+    fi
+
+    case "$shell_name" in
+        zsh)
+            printf '\nIf `%s` is not found immediately, run:\n  rehash\n' "$BIN_NAME"
+            ;;
+        bash|ksh|ash|dash|sh)
+            printf '\nIf `%s` is not found immediately, run:\n  hash -r\n' "$BIN_NAME"
+            ;;
+        fish)
+            printf '\nIf `%s` is not found immediately, start a new shell session.\n' "$BIN_NAME"
+            ;;
+        *)
+            printf '\nIf `%s` is not found immediately, reopen your terminal or refresh command lookup.\n' "$BIN_NAME"
+            ;;
+    esac
+}
+
+persist_path_hint() {
+    dir="$1"
+    shell_name=""
+    if [ -n "${SHELL:-}" ]; then
+        shell_name=$(basename "$SHELL")
+    fi
+
+    case "$shell_name" in
+        zsh)
+            rc_file="$HOME/.zshrc"
+            line="export PATH=\"$dir:\$PATH\""
+            ;;
+        bash)
+            rc_file="$HOME/.bashrc"
+            line="export PATH=\"$dir:\$PATH\""
+            ;;
+        fish)
+            rc_file="$HOME/.config/fish/config.fish"
+            line="fish_add_path $dir"
+            ;;
+        *)
+            rc_file=""
+            ;;
+    esac
+
+    if [ -n "${rc_file:-}" ]; then
+        mkdir -p "$(dirname "$rc_file")"
+        if [ ! -f "$rc_file" ] || ! grep -F "$line" "$rc_file" >/dev/null 2>&1; then
+            printf '\n%s\n' "$line" >> "$rc_file"
+            info "Added $dir to PATH in $rc_file"
+        fi
+    fi
+}
+
 pick_install_dir() {
     if [ -n "${INSTALL_DIR:-}" ]; then
         mkdir -p "$INSTALL_DIR"
@@ -148,6 +206,7 @@ main() {
     case ":$PATH:" in
         *":$dir:"*) ;;
         *)
+            persist_path_hint "$dir"
             printf '\nNote: %s is not on your PATH. Add it with:\n  export PATH="%s:$PATH"\n' \
                 "$dir" "$dir"
             ;;
@@ -157,6 +216,8 @@ main() {
         printf '\nLinux: if device discovery (ping) fails as a non-root user, run:\n'
         printf '  sudo setcap cap_net_raw=+ep %s\n' "$target"
     fi
+
+    print_command_refresh_hint
 
     printf '\nDone. Run: %s --help\n' "$BIN_NAME"
 }
