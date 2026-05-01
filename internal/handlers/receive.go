@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tingkai-c/localsend-cli/internal/config"
@@ -26,8 +27,9 @@ import (
 var (
 	sessionIDCounter  = 0
 	sessionMutex      sync.Mutex
-	receiveSessions   = make(map[string]map[string]string) // keyed by sessionId -> fileID -> fileName
+	receiveSessions   = make(map[string]receiveSession)
 	receiveSessionsMu sync.RWMutex
+	dashboardActive   atomic.Bool
 )
 
 type receiveSession struct {
@@ -36,6 +38,12 @@ type receiveSession struct {
 }
 
 var errUserRejected = errors.New("user rejected")
+
+// SetDashboardActive prevents HTTP receive handlers from opening a stdin
+// approval prompt while the Bubble Tea dashboard owns the terminal.
+func SetDashboardActive(active bool) {
+	dashboardActive.Store(active)
+}
 
 func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	var req models.PrepareReceiveRequest
@@ -63,17 +71,14 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	fileNames := make(map[string]string)
 	for fileID, fileInfo := range req.Files {
 		token := fmt.Sprintf("token-%s", fileID)
-		files[fileID] = token
+		responseTokens[fileID] = token
+		fileNames[fileID] = fileInfo.FileName
 
 		if strings.HasSuffix(fileInfo.FileName, ".txt") {
 			logger.Success("TXT file content preview:", string(fileInfo.Preview))
 			clipboard.WriteToClipBoard(fileInfo.Preview)
 		}
 	}
-	receiveSessionsMu.Lock()
-	receiveSessions[sessionID] = files
-	receiveSessionsMu.Unlock()
-
 	receiveSessionsMu.Lock()
 	receiveSessions[sessionID] = receiveSession{
 		fileNames: fileNames,
@@ -115,6 +120,10 @@ func authorizeIncoming(alias, fingerprint string, files map[string]models.FileIn
 	if trust.IsTrusted(fingerprint) {
 		logger.Infof("Auto-accepting trusted fingerprint %s (%s)", shortFP(fingerprint), alias)
 		return nil
+	}
+	if dashboardActive.Load() {
+		logger.Warn("Rejecting incoming session: approval is required while the dashboard owns the terminal. Open Receive mode, enable Quick Save, or trust this sender first.")
+		return prompt.ErrNoTTY
 	}
 	if !prompt.IsTTY() {
 		logger.Warn("Rejecting incoming session: stdin is not a TTY and quick_save is OFF. Set quick_save: true (or trust this sender once interactively) to receive on this host.")

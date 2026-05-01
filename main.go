@@ -10,22 +10,20 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 
 	bubbletea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/tingkai-c/localsend-cli/internal/config"
 	"github.com/tingkai-c/localsend-cli/internal/discovery"
 	"github.com/tingkai-c/localsend-cli/internal/discovery/shared"
 	"github.com/tingkai-c/localsend-cli/internal/handlers"
-	"github.com/tingkai-c/localsend-cli/internal/models"
 	"github.com/tingkai-c/localsend-cli/internal/pkg/server"
 	"github.com/tingkai-c/localsend-cli/internal/trust"
 	"github.com/tingkai-c/localsend-cli/internal/utils/cert"
 	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 	"github.com/tingkai-c/localsend-cli/static"
-	qrcode "github.com/skip2/go-qrcode"
 )
 
 type textInputModel struct {
@@ -154,20 +152,12 @@ type model struct {
 type appMode int
 
 const (
-	modeInteractive appMode = iota
+	modeUnknown appMode = iota
 	modeWeb
 	modeSend
 	modeReceive
-	modeForget
-	modeTrusted
-	modeHelp
 	modeExit
 )
-
-type appCommand struct {
-	mode appMode
-	arg  string
-}
 
 var tuiModes = map[string]appMode{
 	"📤 Send":    modeSend,
@@ -238,6 +228,7 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 	case bubbletea.KeyMsg:
 		if m.filePrompt {
 			if msg.String() == "ctrl+c" {
+				m.mode = "❌ Exit"
 				return m, bubbletea.Quit
 			}
 			m.textInput, _ = m.textInput.Update(msg)
@@ -261,6 +252,9 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "ctrl+c", "q":
+			m.mode = "❌ Exit"
+			return m, bubbletea.Quit
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -313,12 +307,18 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 func (m model) View() string {
 	var s strings.Builder
 
-	// 标题
-	s.WriteString(titleStyle.Render("💫 LocalSend CLI 💫"))
+	s.WriteString(titleStyle.Render("LocalSend CLI"))
+	s.WriteString("\n")
+	s.WriteString(menuStyle.Render("Receiver is ready for Quick Save and trusted senders"))
+	s.WriteString("\n")
+	s.WriteString(menuStyle.Render(fmt.Sprintf("Device: %s  Port: %d", config.ConfigData.NameOfDevice, config.ConfigData.Port)))
+	s.WriteString("\n")
+	s.WriteString(menuStyle.Render("Output: " + config.ConfigData.OutputDir))
 	s.WriteString("\n\n")
 
-	// 菜单
 	if m.mode == "" {
+		s.WriteString(inputPromptStyle.Render("Choose an action"))
+		s.WriteString("\n")
 		for i, choice := range m.choices {
 			if i == m.cursor {
 				s.WriteString(selectedItemStyle.Render(choice))
@@ -327,15 +327,17 @@ func (m model) View() string {
 			}
 			s.WriteString("\n")
 		}
+		s.WriteString("\n")
+		s.WriteString(menuStyle.Render("↑/↓ or j/k: navigate • Enter: select • q/Ctrl+C: quit"))
 	} else {
-		// 显示当前模式
 		s.WriteString(menuStyle.Render(m.mode))
 		s.WriteString("\n\n")
 
-		// 文件路径输入
 		if m.filePrompt {
 			s.WriteString(inputPromptStyle.Render("Enter file path: "))
 			s.WriteString(inputStyle.Render(m.textInput.View()))
+			s.WriteString("\n")
+			s.WriteString(menuStyle.Render("Tab: complete path • Esc: back • Ctrl+C: quit"))
 		}
 	}
 
@@ -367,13 +369,12 @@ func WebServerMode(httpServer *http.ServeMux, port int) {
 	}
 	qr, err := qrcode.New(fmt.Sprintf("http://%s:%d", localIP, port), qrcode.Highest)
 	if err != nil {
-		fmt.Println("生成二维码失败:", err)
+		fmt.Println("Failed to generate QR code:", err)
 		return
 	}
 
-	// 打印二维码到终端
 	fmt.Println(qr.ToString(false))
-	select {}
+	waitForInterrupt("Web server stopped.")
 }
 
 func ReceiveMode() {
@@ -384,7 +385,7 @@ func ReceiveMode() {
 	}
 	discovery.ListenAndStartBroadcasts(nil)
 	logger.Infof("Waiting to receive files (output: %s)...", config.ConfigData.OutputDir)
-	select {}
+	waitForInterrupt("Receive mode stopped.")
 }
 
 func SendMode(filePath string) {
@@ -397,6 +398,14 @@ func SendMode(filePath string) {
 func ExitMode() {
 	fmt.Println("Exiting program...")
 	os.Exit(0)
+}
+
+func waitForInterrupt(message string) {
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signalChan)
+	<-signalChan
+	fmt.Println("\n" + message)
 }
 
 // showUsage prints the CLI help. Defined at package scope so it can be wired
@@ -557,13 +566,6 @@ func certDir() string {
 
 func main() {
 	var flagOpen bool = false
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-signalChan
-		fmt.Println("\n收到中断信号，正在退出...")
-		os.Exit(0)
-	}()
 	logger.InitLogger()
 
 	// Parse flags up front so config values (port, output dir, device name)
@@ -637,33 +639,33 @@ func main() {
 	flagParse(httpServer, config.ConfigData.Port, &flagOpen)
 
 	if !flagOpen {
-		// Run Bubble Tea program
-		p := bubbletea.NewProgram(initialModel(), bubbletea.WithoutSignalHandler())
+		discovery.ListenAndStartBroadcasts(nil)
+		handlers.SetDashboardActive(true)
+		defer handlers.SetDashboardActive(false)
+
+		p := bubbletea.NewProgram(initialModel())
 		m, err := p.Run()
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		mTyped := m.(model)
-		mode := mTyped.mode
-
-		if mode == "❌ Exit" {
+		switch tuiModes[mTyped.mode] {
+		case modeExit:
 			ExitMode()
-		}
-
-		if mode == "📤 Send" {
+		case modeSend:
 			filePath := mTyped.textInput.Value()
 			if filePath == "" {
 				fmt.Println("Send mode requires a file path")
 				os.Exit(1)
 			}
+			handlers.SetDashboardActive(false)
 			SendMode(filePath)
-		}
-
-		if mode == "📥 Receive" {
+		case modeReceive:
+			handlers.SetDashboardActive(false)
 			ReceiveMode()
-		}
-		if mode == "🌎 Web" {
+		case modeWeb:
+			handlers.SetDashboardActive(false)
 			WebServerMode(httpServer, port)
 		}
 	}
