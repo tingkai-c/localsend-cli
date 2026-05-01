@@ -30,6 +30,13 @@ var (
 	receiveSessionsMu sync.RWMutex
 )
 
+type receiveSession struct {
+	fileNames map[string]string // fileID -> fileName
+	tokens    map[string]string // fileID -> expected token
+}
+
+var errUserRejected = errors.New("user rejected")
+
 func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	var req models.PrepareReceiveRequest
 	err := json.NewDecoder(r.Body).Decode(&req)
@@ -40,9 +47,10 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 
 	logger.Infof("Received request from %s,device is %s", req.Info.Alias, req.Info.DeviceModel)
 
-	if !authorizeIncoming(req.Info.Alias, req.Info.Fingerprint, req.Files) {
+	authErr := authorizeIncoming(req.Info.Alias, req.Info.Fingerprint, req.Files)
+	if authErr != nil {
 		// authorizeIncoming logs the reason; HTTP status was set there.
-		writeAuthError(w, lastAuthErr())
+		writeAuthError(w, authErr)
 		return
 	}
 
@@ -51,7 +59,8 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	sessionID := fmt.Sprintf("session-%d", sessionIDCounter)
 	sessionMutex.Unlock()
 
-	files := make(map[string]string)
+	responseTokens := make(map[string]string)
+	fileNames := make(map[string]string)
 	for fileID, fileInfo := range req.Files {
 		token := fmt.Sprintf("token-%s", fileID)
 		files[fileID] = token
@@ -65,38 +74,19 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	receiveSessions[sessionID] = files
 	receiveSessionsMu.Unlock()
 
+	receiveSessionsMu.Lock()
+	receiveSessions[sessionID] = receiveSession{
+		fileNames: fileNames,
+		tokens:    responseTokens,
+	}
+	receiveSessionsMu.Unlock()
+
 	resp := models.PrepareReceiveResponse{
 		SessionID: sessionID,
-		Files:     files,
+		Files:     responseTokens,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
-}
-
-// authErr is set by authorizeIncoming so PrepareReceive can map the failure
-// to the correct HTTP status without re-checking conditions inline. It's
-// scoped to a single request via lastAuthErrKey on the goroutine — but Go
-// has no such thing, so we just stash it on a per-request basis through a
-// package-level value protected by the prompt mutex implicitly. This is
-// fine: only one prompt may be active at a time, so the "in flight" auth
-// failure is unique while it lives.
-var (
-	authErrMu sync.Mutex
-	authErr   error
-)
-
-func setAuthErr(err error) {
-	authErrMu.Lock()
-	authErr = err
-	authErrMu.Unlock()
-}
-
-func lastAuthErr() error {
-	authErrMu.Lock()
-	defer authErrMu.Unlock()
-	err := authErr
-	authErr = nil
-	return err
 }
 
 func writeAuthError(w http.ResponseWriter, err error) {
@@ -116,20 +106,19 @@ func writeAuthError(w http.ResponseWriter, err error) {
 // precedence (each step short-circuits acceptance):
 //  1. Quick Save bypasses every check.
 //  2. A previously-trusted fingerprint bypasses the prompt.
-//  3. No TTY → reject without prompting (avoids hanging headless servers).
+//  3. No TTY -> reject without prompting (avoids hanging headless servers).
 //  4. Otherwise prompt the user; persist the fingerprint on "Always".
-func authorizeIncoming(alias, fingerprint string, files map[string]models.FileInfo) bool {
+func authorizeIncoming(alias, fingerprint string, files map[string]models.FileInfo) error {
 	if config.ConfigData.QuickSave {
-		return true
+		return nil
 	}
 	if trust.IsTrusted(fingerprint) {
 		logger.Infof("Auto-accepting trusted fingerprint %s (%s)", shortFP(fingerprint), alias)
-		return true
+		return nil
 	}
 	if !prompt.IsTTY() {
 		logger.Warn("Rejecting incoming session: stdin is not a TTY and quick_save is OFF. Set quick_save: true (or trust this sender once interactively) to receive on this host.")
-		setAuthErr(prompt.ErrNoTTY)
-		return false
+		return prompt.ErrNoTTY
 	}
 
 	summaries := make([]prompt.FileSummary, 0, len(files))
@@ -142,8 +131,7 @@ func authorizeIncoming(alias, fingerprint string, files map[string]models.FileIn
 	decision, err := prompt.AskApproval(ctx, alias, fingerprint, summaries)
 	if err != nil {
 		logger.Infof("Approval prompt error: %v", err)
-		setAuthErr(err)
-		return false
+		return err
 	}
 	switch decision {
 	case prompt.AcceptAlways:
@@ -154,12 +142,11 @@ func authorizeIncoming(alias, fingerprint string, files map[string]models.FileIn
 		} else {
 			logger.Infof("Trusted %s (%s) for future sessions", alias, shortFP(fingerprint))
 		}
-		return true
+		return nil
 	case prompt.Accept:
-		return true
+		return nil
 	default:
-		setAuthErr(errors.New("user rejected"))
-		return false
+		return errUserRejected
 	}
 }
 
@@ -181,23 +168,31 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 使用 fileID 获取文件名
 	receiveSessionsMu.RLock()
-	sessionFiles, ok := receiveSessions[sessionID]
+	sessionData, ok := receiveSessions[sessionID]
 	receiveSessionsMu.RUnlock()
 	if !ok {
 		http.Error(w, "invalid session", http.StatusBadRequest)
 		return
 	}
-	fileName, ok := sessionFiles[fileID]
+	expectedToken, ok := sessionData.tokens[fileID]
+	if !ok || token != expectedToken {
+		http.Error(w, "invalid token", http.StatusForbidden)
+		return
+	}
+	fileName, ok := sessionData.fileNames[fileID]
 	if !ok {
 		http.Error(w, "Invalid file ID", http.StatusBadRequest)
 		return
 	}
 
-	// 生成文件路径，保留文件扩展名
+	defer func() {
+		receiveSessionsMu.Lock()
+		delete(receiveSessions, sessionID)
+		receiveSessionsMu.Unlock()
+	}()
+
 	filePath := filepath.Join(config.ConfigData.OutputDir, fileName)
-	// 创建文件夹（如果不存在）
 	dir := filepath.Dir(filePath)
 	err := os.MkdirAll(dir, os.ModePerm)
 	if err != nil {
@@ -205,7 +200,6 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 		logger.Errorf("Error creating directory: %v", err)
 		return
 	}
-	// 创建文件
 	file, err := os.Create(filePath)
 	if err != nil {
 		http.Error(w, "Failed to create file", http.StatusInternalServerError)
@@ -214,28 +208,24 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// 创建一个 context 来处理请求取消
 	ctx := r.Context()
-
-	// 创建文件后，获取文件大小
 	contentLength := r.ContentLength
 
-	// 创建进度条
 	bar := progressbar.NewOptions64(
 		contentLength,
-		progressbar.OptionSetDescription(fmt.Sprintf("下载 %s", fileName)),
+		progressbar.OptionSetDescription(fmt.Sprintf("Download %s", fileName)),
 		progressbar.OptionSetWidth(15),
 		progressbar.OptionShowBytes(true),
-		progressbar.OptionThrottle(time.Second), // 降低刷新频率，减少闪烁
+		progressbar.OptionThrottle(time.Second),
 		progressbar.OptionShowCount(),
-		progressbar.OptionClearOnFinish(), // 完成时清除进度条
+		progressbar.OptionClearOnFinish(),
 		progressbar.OptionSetRenderBlankState(true),
-		progressbar.OptionSetPredictTime(true), // 预测剩余时间
-		progressbar.OptionFullWidth(),          // 使用全宽显示
+		progressbar.OptionSetPredictTime(true),
+		progressbar.OptionFullWidth(),
 		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "█", // 使用实心方块
+			Saucer:        "█",
 			SaucerHead:    "█",
-			SaucerPadding: "░", // 使用灰色方块作为背景
+			SaucerPadding: "░",
 			BarStart:      "|",
 			BarEnd:        "|",
 		}),
@@ -244,9 +234,7 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 		}),
 	)
 
-	buffer := make([]byte, 2*1024*1024) // 2MB 缓冲区
-
-	// 使用 channel 来处理传输完成或取消
+	buffer := make([]byte, 2*1024*1024)
 	done := make(chan error, 1)
 
 	go func() {
@@ -271,13 +259,11 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// 等待传输完成或取消
 	select {
 	case err := <-done:
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			logger.Errorf("Transfer error: %v", err)
-			// 删除未完成的文件
 			os.Remove(filePath)
 			return
 		}
@@ -294,8 +280,5 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Success("File saved to:", filePath)
-	receiveSessionsMu.Lock()
-	delete(receiveSessions, sessionID)
-	receiveSessionsMu.Unlock()
 	w.WriteHeader(http.StatusOK)
 }

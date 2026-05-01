@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/schollz/progressbar/v3"
 	"github.com/tingkai-c/localsend-cli/internal/config"
 	"github.com/tingkai-c/localsend-cli/internal/discovery"
 	"github.com/tingkai-c/localsend-cli/internal/discovery/shared"
@@ -19,7 +20,6 @@ import (
 	"github.com/tingkai-c/localsend-cli/internal/tui"
 	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 	"github.com/tingkai-c/localsend-cli/internal/utils/sha256"
-	"github.com/schollz/progressbar/v3"
 )
 
 // SendFileToOtherDevicePrepare 函数
@@ -127,10 +127,10 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 	}
 	fileSize := fileInfo.Size()
 
-	// 创建进度条
+	// Create progress bar
 	bar := progressbar.NewOptions64(
 		fileSize,
-		progressbar.OptionSetDescription(fmt.Sprintf("上传 %s", filepath.Base(filePath))),
+		progressbar.OptionSetDescription(fmt.Sprintf("Uploading %s", filepath.Base(filePath))),
 		progressbar.OptionSetWidth(15),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionThrottle(time.Second), // 降低刷新频率，减少闪烁
@@ -199,10 +199,10 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 	// 检查是否被取消
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("传输已取消")
+		return fmt.Errorf("transfer canceled")
 	case err := <-uploadErr:
 		if err != nil {
-			return fmt.Errorf("上传出错: %w", err)
+			return fmt.Errorf("upload failed: %w", err)
 		}
 	default:
 		if err != nil {
@@ -225,7 +225,7 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 		return fmt.Errorf("file upload failed: received status code %d", resp.StatusCode)
 	}
 
-	fmt.Println() // 添加换行，让进度条显示更清晰
+	fmt.Println()
 	logger.Success("File uploaded successfully")
 	return nil
 }
@@ -234,7 +234,7 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 func SendFile(path string) error {
 	updates := make(chan []models.SendModel)
 	discovery.ListenAndStartBroadcasts(updates)
-	fmt.Println("Please select a device you want to send file to:")
+	fmt.Println("Please select a device you want to send a file to:")
 	ip, err := tui.SelectDevice(updates)
 	if err != nil {
 		return err
@@ -281,9 +281,9 @@ func SendFile(path string) error {
 func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Handling upload request...") // Debug log - request start
 
-	// 限制表单数据大小（此处设置为 10 MB，可根据需要调整）
+	// Limit multipart form size (set to 10 MB).
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		http.Error(w, fmt.Sprintf("解析表单失败: %v", err), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("Failed to parse multipart form: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -294,7 +294,7 @@ func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
 	// 获取所有上传的文件
 	files := r.MultipartForm.File["file"]
 	if len(files) == 0 {
-		http.Error(w, "未上传任何文件", http.StatusBadRequest)
+		http.Error(w, "No file uploaded", http.StatusBadRequest)
 		return
 	}
 
@@ -311,7 +311,7 @@ func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 创建最终的上传目录（如果不存在）
 	if err := os.MkdirAll(finalUploadDir, os.ModePerm); err != nil {
-		http.Error(w, fmt.Sprintf("无法创建上传目录: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to create upload directory: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -320,7 +320,7 @@ func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
 		// 打开上传的文件
 		file, err := fileHeader.Open()
 		if err != nil {
-			http.Error(w, fmt.Sprintf("无法打开文件: %v", err), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("Failed to open file: %v", err), http.StatusInternalServerError)
 			return
 		}
 		defer file.Close()
@@ -331,25 +331,25 @@ func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
 
 		// 创建目标目录（如果不存在）
 		if err := os.MkdirAll(filepath.Dir(destPath), os.ModePerm); err != nil {
-			http.Error(w, fmt.Sprintf("无法创建目录: %v", err), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("Failed to create directory: %v", err), http.StatusInternalServerError)
 			return
 		}
 
 		// 创建目标文件
 		dst, err := os.Create(destPath)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("无法创建文件: %v", err), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("Failed to create file: %v", err), http.StatusInternalServerError)
 			return
 		}
 		defer dst.Close()
 
 		// 将上传的文件内容写入目标文件
 		if _, err := io.Copy(dst, file); err != nil {
-			http.Error(w, fmt.Sprintf("保存文件失败: %v", err), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("Failed to save file: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, "文件上传成功，共计 %d 个文件，上传到目录: %s\n", len(files), finalUploadDir)
+	fmt.Fprintf(w, "Upload completed: %d files, saved to %s\n", len(files), finalUploadDir)
 }
