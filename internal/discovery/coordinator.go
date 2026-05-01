@@ -9,22 +9,22 @@ import (
 type broadcastListener func(chan<- []models.SendModel)
 
 type discoveryCoordinator struct {
-	once      sync.Once
-	mu        sync.RWMutex
-	subs      []chan<- []models.SendModel
-	updates   chan []models.SendModel
-	listenUDP broadcastListener
+	once       sync.Once
+	mu         sync.RWMutex
+	subs       []chan<- []models.SendModel
+	updates    chan []models.SendModel
+	listenUDP  broadcastListener
 	listenHTTP broadcastListener
-	startUDP  func()
+	startUDP   func()
 }
 
 func newDiscoveryCoordinator(listenUDP, listenHTTP broadcastListener, startUDP func()) *discoveryCoordinator {
 	return &discoveryCoordinator{
 		listenUDP:  listenUDP,
-		listenHTTP:  listenHTTP,
-		startUDP:    startUDP,
-		subs:        make([]chan<- []models.SendModel, 0),
-		updates:     make(chan []models.SendModel),
+		listenHTTP: listenHTTP,
+		startUDP:   startUDP,
+		subs:       make([]chan<- []models.SendModel, 0),
+		updates:    make(chan []models.SendModel),
 	}
 }
 
@@ -38,7 +38,21 @@ func Subscribe(updates chan<- []models.SendModel) {
 	defaultDiscoveryCoordinator.Subscribe(updates)
 }
 
+func (c *discoveryCoordinator) ListenAndStartBroadcasts(updates chan<- []models.SendModel) {
+	if updates != nil {
+		c.Subscribe(updates)
+		return
+	}
+
+	c.start()
+}
+
 func (c *discoveryCoordinator) Subscribe(updates chan<- []models.SendModel) {
+	if updates == nil {
+		c.start()
+		return
+	}
+
 	c.mu.Lock()
 	c.subs = append(c.subs, updates)
 	c.mu.Unlock()
