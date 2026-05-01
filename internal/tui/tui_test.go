@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,4 +51,25 @@ func TestSelectDevice(t *testing.T) {
 	if !expectedIPs[ip] {
 		t.Fatalf("SelectDevice returned an unexpected IP: %s", ip)
 	}
+}
+
+func TestViewPreview(t *testing.T) {
+	m := model{
+		devices: []models.SendModel{
+			{IP: "192.168.1.10", DeviceName: "MacBook Pro"},
+			{IP: "192.168.1.22", DeviceName: "Steam Deck"},
+			{IP: "192.168.1.35", DeviceName: "Pixel 9"},
+		},
+		cursor: 1,
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "LocalSend") {
+		t.Fatalf("expected title in view, got: %q", view)
+	}
+	if !strings.Contains(view, "Steam Deck") {
+		t.Fatalf("expected selected device in view, got: %q", view)
+	}
+
+	t.Logf("TUI preview:\n%s", view)
 }

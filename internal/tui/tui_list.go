@@ -2,11 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tingkai-c/localsend-cli/internal/models"
 
 	bubbletea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // selectDevice 使用 Bubble Tea 库显示可供选择的设备列表并等待用户选择
@@ -59,7 +61,38 @@ type model struct {
 	sortedKeys []string                    // 保持固定的显示顺序
 	cursor     int
 	updates    <-chan []models.SendModel
+	width      int
 }
+
+var (
+	appStyle = lipgloss.NewStyle().
+			Padding(1, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("63"))
+
+	titleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("86"))
+
+	subtitleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("245"))
+
+	selectedStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("230")).
+			Background(lipgloss.Color("63")).
+			Padding(0, 1)
+
+	normalStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
+
+	emptyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214"))
+			// Slight emphasis for loading state.
+
+	helpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244"))
+)
 
 // TickMsg 用于定期触发更新
 type TickMsg time.Time
@@ -128,24 +161,48 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 		default:
 		}
 		return m, tick()
+	case bubbletea.WindowSizeMsg:
+		m.width = msg.Width
 	}
 	return m, nil
 }
 
 // View 实现 Bubble Tea 的 View 方法
 func (m model) View() string {
-	if len(m.devices) == 0 {
-		return "Scanning Devices...\n\n Press Ctrl+C to exit"
+	panel := appStyle
+	if m.width > 0 {
+		maxWidth := m.width - 2
+		if maxWidth > 32 {
+			panel = panel.MaxWidth(maxWidth)
+		}
 	}
 
-	s := "Found Devices:\n\n"
-	for i, device := range m.devices {
-		cursor := " " // 默认没有光标
-		if m.cursor == i {
-			cursor = ">" // 选中的光标
-		}
-		s += fmt.Sprintf("%s %s (%s)\n", cursor, device.DeviceName, device.IP)
+	if len(m.devices) == 0 {
+		body := strings.Join([]string{
+			titleStyle.Render("LocalSend"),
+			"",
+			emptyStyle.Render("⏳ Scanning for nearby devices..."),
+			"",
+			helpStyle.Render("Press Ctrl+C to exit"),
+		}, "\n")
+		return panel.Render(body)
 	}
-	s += "\nUse arrow keys to navigate and enter to select. Press Ctrl+C to exit."
-	return s
+
+	lines := []string{
+		titleStyle.Render("LocalSend"),
+		subtitleStyle.Render(fmt.Sprintf("Found Devices • %d online", len(m.devices))),
+		"",
+	}
+
+	for i, device := range m.devices {
+		line := fmt.Sprintf("  %s  %s", device.DeviceName, subtitleStyle.Render(device.IP))
+		if m.cursor == i {
+			lines = append(lines, selectedStyle.Render("› "+line))
+			continue
+		}
+		lines = append(lines, normalStyle.Render("  "+line))
+	}
+
+	lines = append(lines, "", helpStyle.Render("↑/↓ or j/k: navigate • Enter: select • Ctrl+C: quit"))
+	return panel.Render(strings.Join(lines, "\n"))
 }
