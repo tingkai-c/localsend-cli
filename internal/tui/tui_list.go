@@ -64,6 +64,24 @@ type model struct {
 	width      int
 }
 
+// DashboardAction 表示仪表盘可识别的高层操作。
+type DashboardAction string
+
+const (
+	DashboardActionNone     DashboardAction = "none"
+	DashboardActionQuit     DashboardAction = "quit"
+	DashboardActionMoveUp   DashboardAction = "move_up"
+	DashboardActionMoveDown DashboardAction = "move_down"
+	DashboardActionSelect   DashboardAction = "select"
+)
+
+// DashboardResult 表示一次仪表盘更新后的结果。
+type DashboardResult struct {
+	Action DashboardAction
+	Model  model
+	Cmd    bubbletea.Cmd
+}
+
 var (
 	appStyle = lipgloss.NewStyle().
 			Padding(1, 2).
@@ -88,7 +106,7 @@ var (
 
 	emptyStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("214"))
-			// Slight emphasis for loading state.
+		// Slight emphasis for loading state.
 
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("244"))
@@ -111,21 +129,29 @@ func tick() bubbletea.Cmd {
 
 // Update 实现 Bubble Tea 的 Update 方法
 func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
+	result := m.UpdateDashboard(msg)
+	return result.Model, result.Cmd
+}
+
+// UpdateDashboard 将 Bubble Tea 消息转换为可测试的仪表盘结果。
+func (m model) UpdateDashboard(msg bubbletea.Msg) DashboardResult {
 	switch msg := msg.(type) {
 	case bubbletea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			return m, bubbletea.Quit
-		case "down", "j":
+		switch dashboardActionFromKey(msg.String()) {
+		case DashboardActionQuit:
+			return DashboardResult{Action: DashboardActionQuit, Model: m, Cmd: bubbletea.Quit}
+		case DashboardActionMoveDown:
 			if len(m.devices) > 0 {
 				m.cursor = (m.cursor + 1) % len(m.devices) // 向下移动
 			}
-		case "up", "k":
+			return DashboardResult{Action: DashboardActionMoveDown, Model: m}
+		case DashboardActionMoveUp:
 			if len(m.devices) > 0 {
 				m.cursor = (m.cursor - 1 + len(m.devices)) % len(m.devices) // 向上移动
 			}
-		case "enter":
-			return m, bubbletea.Quit // 退出选择
+			return DashboardResult{Action: DashboardActionMoveUp, Model: m}
+		case DashboardActionSelect:
+			return DashboardResult{Action: DashboardActionSelect, Model: m, Cmd: bubbletea.Quit}
 		}
 	case TickMsg:
 		select {
@@ -160,11 +186,26 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 			}
 		default:
 		}
-		return m, tick()
+		return DashboardResult{Action: DashboardActionNone, Model: m, Cmd: tick()}
 	case bubbletea.WindowSizeMsg:
 		m.width = msg.Width
 	}
-	return m, nil
+	return DashboardResult{Action: DashboardActionNone, Model: m}
+}
+
+func dashboardActionFromKey(key string) DashboardAction {
+	switch key {
+	case "q", "ctrl+c":
+		return DashboardActionQuit
+	case "down", "j":
+		return DashboardActionMoveDown
+	case "up", "k":
+		return DashboardActionMoveUp
+	case "enter":
+		return DashboardActionSelect
+	default:
+		return DashboardActionNone
+	}
 }
 
 // View 实现 Bubble Tea 的 View 方法

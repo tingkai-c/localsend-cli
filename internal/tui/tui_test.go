@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	bubbletea "github.com/charmbracelet/bubbletea"
 	"github.com/tingkai-c/localsend-cli/internal/models"
 )
 
@@ -72,4 +73,58 @@ func TestViewPreview(t *testing.T) {
 	}
 
 	t.Logf("TUI preview:\n%s", view)
+}
+
+func TestDashboardActionFromKeyMappings(t *testing.T) {
+	cases := map[string]DashboardAction{
+		"ctrl+c": DashboardActionQuit,
+		"q":      DashboardActionQuit,
+		"enter":  DashboardActionSelect,
+		"j":      DashboardActionMoveDown,
+		"k":      DashboardActionMoveUp,
+		"noop":   DashboardActionNone,
+	}
+
+	for key, want := range cases {
+		if got := dashboardActionFromKey(key); got != want {
+			t.Fatalf("dashboardActionFromKey(%q) = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestUpdateDashboardCtrlCQuits(t *testing.T) {
+	m := model{
+		devices: []models.SendModel{
+			{IP: "192.168.1.10", DeviceName: "MacBook Pro"},
+		},
+		cursor: 0,
+	}
+
+	result := m.UpdateDashboard(bubbletea.KeyMsg{Type: bubbletea.KeyCtrlC})
+	if result.Action != DashboardActionQuit {
+		t.Fatalf("expected quit action, got %q", result.Action)
+	}
+	if _, ok := result.Cmd().(bubbletea.QuitMsg); !ok {
+		t.Fatalf("expected QuitMsg from ctrl+c, got %T", result.Cmd())
+	}
+	if result.Model.cursor != 0 {
+		t.Fatalf("ctrl+c should not mutate cursor, got %d", result.Model.cursor)
+	}
+}
+
+func TestUpdateDashboardEnterSelects(t *testing.T) {
+	m := model{
+		devices: []models.SendModel{
+			{IP: "192.168.1.10", DeviceName: "MacBook Pro"},
+		},
+		cursor: 0,
+	}
+
+	result := m.UpdateDashboard(bubbletea.KeyMsg{Type: bubbletea.KeyEnter})
+	if result.Action != DashboardActionSelect {
+		t.Fatalf("expected select action, got %q", result.Action)
+	}
+	if _, ok := result.Cmd().(bubbletea.QuitMsg); !ok {
+		t.Fatalf("expected QuitMsg from enter, got %T", result.Cmd())
+	}
 }
