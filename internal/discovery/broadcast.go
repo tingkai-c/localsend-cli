@@ -15,5 +15,5 @@ const (
 )
 
 func ListenAndStartBroadcasts(updates chan<- []models.SendModel) {
-	defaultDiscoveryCoordinator.Subscribe(updates)
+	defaultDiscoveryCoordinator.ListenAndStartBroadcasts(updates)
 }
