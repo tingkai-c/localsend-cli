@@ -3,8 +3,6 @@ package discovery
 import (
 	"time"
 
-	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
-
 	"github.com/tingkai-c/localsend-cli/internal/models"
 )
 
@@ -17,9 +15,5 @@ const (
 )
 
 func ListenAndStartBroadcasts(updates chan<- []models.SendModel) {
-	logger.Info("Listening for broadcasts...")
-	go ListenForUDPBroadcasts(updates)
-	go ListenForHttpBroadCast(updates)
-	logger.Info("Start broadcasts...")
-	go StartUDPBroadcast()
+	defaultCoordinator.ListenAndStartBroadcasts(updates)
 }
