@@ -23,9 +23,9 @@ LocalSend Goは、Go言語で実装されたLocalSendプロトコルのコマン
 
 [中文](doc/README_zh.md) | [EN](doc/README_en.md) | [日本語](doc/README_jp.md)
 
-現在、v1.1.0とv1.2.0のバージョンに分かれています。v1.1.0のドキュメントについては [Localsend-Go-Version-1.1.0 ドキュメント](version1.1.0/) を参照してください。
+現在、v1.1.0とv1.3.1のバージョンに分かれています。v1.1.0のドキュメントについては [Localsend-Go-Version-1.1.0 ドキュメント](version1.1.0/) を参照してください。
 
-以下はv1.2.0バージョンのドキュメントです。
+以下はv1.3.1バージョンのドキュメントです。
 
 ## インストール
 
@@ -37,7 +37,7 @@ LocalSend Goは、Go言語で実装されたLocalSendプロトコルのコマン
 curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh
 ```
 
-環境変数で挙動を調整できます：`VERSION=v1.2.6`、`INSTALL_DIR=$HOME/bin`、`BIN_NAME=lsc`。
+環境変数で挙動を調整できます：`VERSION=v1.3.1`、`INSTALL_DIR=$HOME/bin`、`BIN_NAME=lsc`。
 
 ### Windows (PowerShell)
 

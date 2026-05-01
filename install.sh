@@ -5,7 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh
 #
 # Environment overrides:
-#   VERSION       Tag to install (e.g. v1.2.6). Default: latest release.
+#   VERSION       Tag to install (e.g. v1.3.1). Default: latest release.
 #   INSTALL_DIR   Where to put the binary. Default: /usr/local/bin if writable,
 #                 else $HOME/.local/bin.
 #   BIN_NAME      Installed binary name. Default: localsend-cli.

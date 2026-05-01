@@ -23,9 +23,9 @@ LocalSend Go is a command-line implementation of the LocalSend protocol in Go, s
 
 [中文](doc/README_zh.md) | [EN](doc/README_en.md) | [日本語](doc/README_jp.md)
 
-Currently divided into version v1.1.0 and v1.2.0. For version v1.1.0 documentation, see [Localsend-Go-Version-1.1.0 doc](version1.1.0/).
+Currently divided into version v1.1.0 and v1.3.1. For version v1.1.0 documentation, see [Localsend-Go-Version-1.1.0 doc](version1.1.0/).
 
-The following documentation is for version v1.2.0.
+The following documentation is for version v1.3.1.
 
 ## Installation
 
@@ -37,7 +37,7 @@ The one-liners below download a pre-built binary from [GitHub Releases](https://
 curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh
 ```
 
-Override with `VERSION=v1.2.6`, `INSTALL_DIR=$HOME/bin`, or `BIN_NAME=lsc`.
+Override with `VERSION=v1.3.1`, `INSTALL_DIR=$HOME/bin`, or `BIN_NAME=lsc`.
 
 ### Windows (PowerShell)
 

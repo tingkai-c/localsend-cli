@@ -8,7 +8,7 @@
         irm https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.ps1 | iex
 
     Environment variable overrides:
-        VERSION       Tag to install (e.g. v1.2.6). Default: latest release.
+        VERSION       Tag to install (e.g. v1.3.1). Default: latest release.
         INSTALL_DIR   Install directory. Default: %LOCALAPPDATA%\Programs\localsend-cli.
         BIN_NAME      Installed binary name (without .exe). Default: localsend-cli.
 #>
