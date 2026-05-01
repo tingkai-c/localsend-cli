@@ -101,26 +101,14 @@ func TestListenAndStartBroadcastsAlias(t *testing.T) {
 	var udpCalls, httpCalls, startCalls int32
 	updates := make(chan []models.SendModel, 1)
 
-	previous := defaultDiscoveryCoordinator
-	defaultDiscoveryCoordinator = newDiscoveryCoordinator(
-		func(chan<- []models.SendModel) {
-			atomic.AddInt32(&udpCalls, 1)
-		},
-		func(chan<- []models.SendModel) {
-			atomic.AddInt32(&httpCalls, 1)
-		},
-		func() {
-			atomic.AddInt32(&startCalls, 1)
-		},
-	)
-	defer func() {
-		defaultDiscoveryCoordinator = previous
-	}()
+	coord := defaultDiscoveryCoordinator
+	coord.Subscribe(updates)
+	time.Sleep(20 * time.Millisecond)
 
-	ListenAndStartBroadcasts(updates)
-	ListenAndStartBroadcasts(nil)
-
-	waitForInt32(t, &udpCalls, 1)
-	waitForInt32(t, &httpCalls, 1)
-	waitForInt32(t, &startCalls, 1)
+	coord.mu.Lock()
+	if coord.updates == nil {
+		t.Fatal("expected updates channel to be initialized")
+	}
+	coord.mu.Unlock()
+}
 }

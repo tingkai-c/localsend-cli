@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 
 	bubbletea "github.com/charmbracelet/bubbletea"
@@ -19,6 +20,7 @@ import (
 	"github.com/tingkai-c/localsend-cli/internal/discovery"
 	"github.com/tingkai-c/localsend-cli/internal/discovery/shared"
 	"github.com/tingkai-c/localsend-cli/internal/handlers"
+	"github.com/tingkai-c/localsend-cli/internal/models"
 	"github.com/tingkai-c/localsend-cli/internal/pkg/server"
 	"github.com/tingkai-c/localsend-cli/internal/trust"
 	"github.com/tingkai-c/localsend-cli/internal/utils/cert"
@@ -152,12 +154,20 @@ type model struct {
 type appMode int
 
 const (
-	modeUnknown appMode = iota
+	modeInteractive appMode = iota
 	modeWeb
 	modeSend
 	modeReceive
+	modeForget
+	modeTrusted
+	modeHelp
 	modeExit
 )
+
+type appCommand struct {
+	mode appMode
+	arg  string
+}
 
 var tuiModes = map[string]appMode{
 	"📤 Send":    modeSend,
