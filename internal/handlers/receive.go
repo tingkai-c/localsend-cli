@@ -26,7 +26,8 @@ import (
 var (
 	sessionIDCounter = 0
 	sessionMutex     sync.Mutex
-	fileNames        = make(map[string]string) // 用于保存文件名
+	receiveSessions  = make(map[string]map[string]string) // keyed by sessionId -> fileID -> fileName
+	receiveSessionsMu sync.RWMutex
 )
 
 func PrepareReceive(w http.ResponseWriter, r *http.Request) {
@@ -54,9 +55,10 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	for fileID, fileInfo := range req.Files {
 		token := fmt.Sprintf("token-%s", fileID)
 		files[fileID] = token
-
-		// 保存文件名
-		fileNames[fileID] = fileInfo.FileName
+	}
+	receiveSessionsMu.Lock()
+	receiveSessions[sessionID] = files
+	receiveSessionsMu.Unlock()
 
 		if strings.HasSuffix(fileInfo.FileName, ".txt") {
 			logger.Success("TXT file content preview:", string(fileInfo.Preview))
@@ -181,7 +183,14 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 使用 fileID 获取文件名
-	fileName, ok := fileNames[fileID]
+	receiveSessionsMu.RLock()
+	sessionFiles, ok := receiveSessions[sessionID]
+	receiveSessionsMu.RUnlock()
+	if !ok {
+		http.Error(w, "invalid session", http.StatusBadRequest)
+		return
+	}
+	fileName, ok := sessionFiles[fileID]
 	if !ok {
 		http.Error(w, "Invalid file ID", http.StatusBadRequest)
 		return
@@ -273,18 +282,21 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 			os.Remove(filePath)
 			return
 		}
-	case <-ctx.Done():
-		// 请求被取消
-		logger.Info("Transfer canceled by client")
-		// 删除未完成的文件
-		os.Remove(filePath)
-		// 关闭连接
-		if conn, ok := w.(http.CloseNotifier); ok {
-			conn.CloseNotify()
-		}
-		return
+		case <-ctx.Done():
+			// 请求被取消
+			logger.Info("Transfer canceled by client")
+			// 删除未完成的文件
+			os.Remove(filePath)
+			// 关闭连接
+			if conn, ok := w.(http.CloseNotifier); ok {
+				conn.CloseNotify()
+			}
+			return
 	}
 
 	logger.Success("File saved to:", filePath)
+	receiveSessionsMu.Lock()
+	delete(receiveSessions, sessionID)
+	receiveSessionsMu.Unlock()
 	w.WriteHeader(http.StatusOK)
 }
