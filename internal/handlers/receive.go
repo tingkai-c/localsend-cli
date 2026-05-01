@@ -18,15 +18,15 @@ import (
 	"github.com/tingkai-c/localsend-cli/internal/prompt"
 	"github.com/tingkai-c/localsend-cli/internal/trust"
 
+	"github.com/schollz/progressbar/v3"
 	"github.com/tingkai-c/localsend-cli/internal/utils/clipboard"
 	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
-	"github.com/schollz/progressbar/v3"
 )
 
 var (
-	sessionIDCounter = 0
-	sessionMutex     sync.Mutex
-	receiveSessions  = make(map[string]map[string]string) // keyed by sessionId -> fileID -> fileName
+	sessionIDCounter  = 0
+	sessionMutex      sync.Mutex
+	receiveSessions   = make(map[string]map[string]string) // keyed by sessionId -> fileID -> fileName
 	receiveSessionsMu sync.RWMutex
 )
 
@@ -55,16 +55,15 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	for fileID, fileInfo := range req.Files {
 		token := fmt.Sprintf("token-%s", fileID)
 		files[fileID] = token
-	}
-	receiveSessionsMu.Lock()
-	receiveSessions[sessionID] = files
-	receiveSessionsMu.Unlock()
 
 		if strings.HasSuffix(fileInfo.FileName, ".txt") {
 			logger.Success("TXT file content preview:", string(fileInfo.Preview))
 			clipboard.WriteToClipBoard(fileInfo.Preview)
 		}
 	}
+	receiveSessionsMu.Lock()
+	receiveSessions[sessionID] = files
+	receiveSessionsMu.Unlock()
 
 	resp := models.PrepareReceiveResponse{
 		SessionID: sessionID,
@@ -282,16 +281,16 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 			os.Remove(filePath)
 			return
 		}
-		case <-ctx.Done():
-			// 请求被取消
-			logger.Info("Transfer canceled by client")
-			// 删除未完成的文件
-			os.Remove(filePath)
-			// 关闭连接
-			if conn, ok := w.(http.CloseNotifier); ok {
-				conn.CloseNotify()
-			}
-			return
+	case <-ctx.Done():
+		// 请求被取消
+		logger.Info("Transfer canceled by client")
+		// 删除未完成的文件
+		os.Remove(filePath)
+		// 关闭连接
+		if conn, ok := w.(http.CloseNotifier); ok {
+			conn.CloseNotify()
+		}
+		return
 	}
 
 	logger.Success("File saved to:", filePath)

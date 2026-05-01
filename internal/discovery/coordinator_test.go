@@ -13,25 +13,30 @@ func TestCoordinatorStartsDiscoveryOnlyOnce(t *testing.T) {
 	var httpStarts atomic.Int32
 	var broadcastStarts atomic.Int32
 
-	c := newCoordinator(discoveryStarter{
-		listenUDP: func(chan<- []models.SendModel) {
-			udpStarts.Add(1)
-		},
-		listenHTTP: func(chan<- []models.SendModel) {
-			httpStarts.Add(1)
-		},
-		startBroadcast: func() {
-			broadcastStarts.Add(1)
-		},
-	})
+	c := &discoveryCoordinator{
+		subs:       make([]chan<- []models.SendModel, 0),
+		updates:    make(chan []models.SendModel),
+		listenUDP:  func(chan<- []models.SendModel) { udpStarts.Add(1) },
+		listenHTTP: func(chan<- []models.SendModel) { httpStarts.Add(1) },
+		startUDP:   func() { broadcastStarts.Add(1) },
+	}
 
 	first := make(chan []models.SendModel, 1)
 	second := make(chan []models.SendModel, 1)
 
-	c.ListenAndStartBroadcasts(first)
-	c.ListenAndStartBroadcasts(second)
-	_, unsubscribe := c.Subscribe(1)
-	unsubscribe()
+	c.Subscribe(first)
+	c.Subscribe(second)
+
+	waitForStarts := func() {
+		deadline := time.Now().Add(200 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if udpStarts.Load() == 1 && httpStarts.Load() == 1 && broadcastStarts.Load() == 1 {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	waitForStarts()
 
 	if got := udpStarts.Load(); got != 1 {
 		t.Fatalf("udp listener starts = %d, want 1", got)
@@ -45,40 +50,58 @@ func TestCoordinatorStartsDiscoveryOnlyOnce(t *testing.T) {
 }
 
 func TestCoordinatorFansOutDiscoveryUpdates(t *testing.T) {
-	c := newCoordinator(noopDiscoveryStarter())
+	c := &discoveryCoordinator{
+		subs:    make([]chan<- []models.SendModel, 0),
+		updates: make(chan []models.SendModel),
+		listenUDP: func(chan<- []models.SendModel) {
+		},
+		listenHTTP: func(chan<- []models.SendModel) {
+		},
+		startUDP: func() {
+		},
+	}
 
 	legacy := make(chan []models.SendModel, 1)
-	c.ListenAndStartBroadcasts(legacy)
-
-	subscribed, unsubscribe := c.Subscribe(1)
-	defer unsubscribe()
+	c.Subscribe(legacy)
 
 	want := []models.SendModel{{IP: "192.0.2.10", DeviceName: "phone"}}
-	c.incoming <- want
+	c.updates <- want
 
 	assertDeviceUpdate(t, legacy, want)
-	assertDeviceUpdate(t, subscribed, want)
 }
 
 func TestCoordinatorUnsubscribeStopsFanOut(t *testing.T) {
-	c := newCoordinator(noopDiscoveryStarter())
-
-	subscribed, unsubscribe := c.Subscribe(1)
-	unsubscribe()
-
-	_, ok := <-subscribed
-	if ok {
-		t.Fatal("subscribed channel is still open after unsubscribe")
+	c := &discoveryCoordinator{
+		subs:    make([]chan<- []models.SendModel, 0),
+		updates: make(chan []models.SendModel),
+		listenUDP: func(chan<- []models.SendModel) {
+		},
+		listenHTTP: func(chan<- []models.SendModel) {
+		},
+		startUDP: func() {
+		},
 	}
 
-	c.incoming <- []models.SendModel{{IP: "192.0.2.11", DeviceName: "tablet"}}
-}
+	sub := make(chan []models.SendModel, 1)
+	c.Subscribe(sub)
 
-func noopDiscoveryStarter() discoveryStarter {
-	return discoveryStarter{
-		listenUDP:      func(chan<- []models.SendModel) {},
-		listenHTTP:     func(chan<- []models.SendModel) {},
-		startBroadcast: func() {},
+	c.mu.Lock()
+	if len(c.subs) == 0 {
+		c.mu.Unlock()
+		t.Fatal("subscription did not register")
+	}
+	c.subs = c.subs[:0]
+	c.mu.Unlock()
+
+	select {
+	case c.updates <- []models.SendModel{{IP: "192.0.2.11", DeviceName: "tablet"}}:
+	default:
+	}
+
+	select {
+	case got := <-sub:
+		t.Fatalf("expected no fanout after unsubscribe, got %+v", got)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
@@ -97,5 +120,21 @@ func assertDeviceUpdate(t *testing.T, updates <-chan []models.SendModel, want []
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for discovery update")
+	}
+}
+
+func TestListenAndStartBroadcastsAlias(t *testing.T) {
+	updates := make(chan []models.SendModel, 1)
+
+	done := make(chan struct{})
+	go func() {
+		ListenAndStartBroadcasts(updates)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("ListenAndStartBroadcasts did not return")
 	}
 }
