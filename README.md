@@ -11,7 +11,7 @@
 
 ## 版本说明 | Version Notes | バージョン情報
 
-- v1.3.1 - 当前最新版本 | Current Version | 現行バージョン
+- v1.3.2 - 当前最新版本 | Current Version | 現行バージョン
 - [v1.1.0](doc/version1.1.0/) - 历史版本 | Historical Version | 過去のバージョン
 
 ## Install
@@ -28,7 +28,7 @@ Defaults to `/usr/local/bin`, falling back to `~/.local/bin` if the former isn't
 
 ```bash
 # Pin a specific version
-VERSION=v1.3.1 curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh
+VERSION=v1.3.2 curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh
 
 # Install to a custom directory
 INSTALL_DIR=$HOME/bin curl -fsSL https://raw.githubusercontent.com/tingkai-c/localsend-cli/main/install.sh | sh

@@ -7,9 +7,11 @@ import (
 	"time"
 
 	bubbletea "github.com/charmbracelet/bubbletea"
+	"github.com/sirupsen/logrus"
 	"github.com/tingkai-c/localsend-cli/internal/approval"
 	"github.com/tingkai-c/localsend-cli/internal/history"
 	"github.com/tingkai-c/localsend-cli/internal/trust"
+	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 )
 
 func TestMainDashboardDispatchUsesTypedActionNotLabel(t *testing.T) {
@@ -241,7 +243,63 @@ func TestMainDashboardCentersInWindowAndUsesModernIcons(t *testing.T) {
 	if firstLine := strings.SplitN(view, "\n", 2)[0]; strings.TrimSpace(firstLine) != "" {
 		t.Fatalf("expected vertically centered dashboard to start with vertical padding, first line %q", firstLine)
 	}
-	if !strings.Contains(view, "✨ LocalSend CLI") || !strings.Contains(view, "🚀 Send") || !strings.Contains(view, "📡 Receive") {
+	if !strings.Contains(view, "✨ LocalSend CLI") || !strings.Contains(view, "🚀 Send") || !strings.Contains(view, "🌐 Web Portal") {
 		t.Fatalf("expected modern dashboard icons, got:\n%s", view)
+	}
+	if strings.Contains(view, "📡 Receive") {
+		t.Fatalf("dashboard should not render redundant receive menu entry:\n%s", view)
+	}
+}
+
+func TestMainDashboardRendersLogNotification(t *testing.T) {
+	m := newDashboardModel(MainDeps{DeviceName: "Laptop", Port: 53317, OutputDir: "/tmp/downloads"})
+	updated, _ := m.Update(bubbletea.WindowSizeMsg{Width: 100, Height: 36})
+	m = updated.(dashboardModel)
+
+	updated, _ = m.Update(logNotificationMsg{Event: logger.LogEvent{
+		Level:   logrus.ErrorLevel,
+		Message: "failed to load trust file",
+	}})
+	m = updated.(dashboardModel)
+
+	view := m.View()
+	if !strings.Contains(view, "⚠ ERROR") || !strings.Contains(view, "failed to load trust file") {
+		t.Fatalf("expected log notification in dashboard view, got:\n%s", view)
+	}
+	if !strings.Contains(view, "✨ LocalSend CLI") {
+		t.Fatalf("notification should not replace dashboard content:\n%s", view)
+	}
+
+	updated, _ = m.Update(clearLogNotificationMsg{ID: m.logNotification.ID})
+	m = updated.(dashboardModel)
+	if strings.Contains(m.View(), "failed to load trust file") {
+		t.Fatalf("notification should clear after matching expiry")
+	}
+}
+
+func TestMainDashboardLogNotificationDoesNotReplaceApprovalModal(t *testing.T) {
+	provider := approval.NewChannelProvider(1)
+	go func() {
+		_, _ = provider.AskApproval(context.Background(), approval.Request{
+			Alias:       "Phone",
+			Fingerprint: "abcdef1234567890",
+			Files:       []approval.File{{Name: "photo.jpg", Size: 1024}},
+		})
+	}()
+	pending := <-provider.Requests()
+	defer pending.Respond(approval.Decision{Action: approval.Reject, Reason: "test"})
+
+	m := newDashboardModel(MainDeps{DeviceName: "Laptop", Port: 53317, OutputDir: "/tmp/downloads"})
+	updated, _ := m.Update(logNotificationMsg{Event: logger.LogEvent{
+		Level:   logrus.WarnLevel,
+		Message: "background warning",
+	}})
+	m = updated.(dashboardModel)
+	updated, _ = m.Update(approvalRequestedMsg{Pending: pending})
+	m = updated.(dashboardModel)
+
+	view := m.View()
+	if !strings.Contains(view, "🔔 Incoming transfer") || !strings.Contains(view, "background warning") {
+		t.Fatalf("approval modal and notification should render together:\n%s", view)
 	}
 }

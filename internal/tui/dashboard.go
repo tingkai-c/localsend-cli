@@ -5,12 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	bubbletea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tingkai-c/localsend-cli/internal/approval"
 	"github.com/tingkai-c/localsend-cli/internal/history"
 	"github.com/tingkai-c/localsend-cli/internal/trust"
+	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 )
 
 // MainAction is the typed action returned by the main TUI shell. It is kept
@@ -22,7 +24,6 @@ const (
 	MainActionNone     MainAction = "none"
 	MainActionExit     MainAction = "exit"
 	MainActionSend     MainAction = "send"
-	MainActionReceive  MainAction = "receive"
 	MainActionWeb      MainAction = "web"
 	MainActionHistory  MainAction = "history"
 	MainActionTrusted  MainAction = "trusted"
@@ -50,6 +51,7 @@ type MainDeps struct {
 	Trusted []trust.Entry
 
 	ApprovalRequests <-chan approval.PendingRequest
+	LogNotifications <-chan logger.LogEvent
 
 	DeleteHistory func(id string) error
 	ClearHistory  func() error
@@ -195,6 +197,8 @@ type dashboardModel struct {
 	historyCursor   int
 	trustedCursor   int
 	pendingApproval *approval.PendingRequest
+	logNotification *dashboardLogNotification
+	nextLogID       int
 	width           int
 	height          int
 }
@@ -204,7 +208,6 @@ func newDashboardModel(deps MainDeps) dashboardModel {
 		view: dashboardViewMenu,
 		items: []dashboardMenuItem{
 			{label: "🚀 Send", action: MainActionSend},
-			{label: "📡 Receive", action: MainActionReceive},
 			{label: "🌐 Web Portal", action: MainActionWeb},
 			{label: "🕘 Activity", action: MainActionHistory},
 			{label: "🛡️ Trusted", action: MainActionTrusted},
@@ -218,12 +221,31 @@ func newDashboardModel(deps MainDeps) dashboardModel {
 }
 
 func (m dashboardModel) Init() bubbletea.Cmd {
-	return bubbletea.Batch(m.textInput.Init(), waitForApproval(m.deps.ApprovalRequests))
+	return bubbletea.Batch(
+		m.textInput.Init(),
+		waitForApproval(m.deps.ApprovalRequests),
+		waitForLogNotification(m.deps.LogNotifications),
+	)
 }
 
 type approvalRequestedMsg struct {
 	Pending approval.PendingRequest
 }
+
+type dashboardLogNotification struct {
+	ID    int
+	Event logger.LogEvent
+}
+
+type logNotificationMsg struct {
+	Event logger.LogEvent
+}
+
+type clearLogNotificationMsg struct {
+	ID int
+}
+
+const logNotificationTTL = 5 * time.Second
 
 func waitForApproval(requests <-chan approval.PendingRequest) bubbletea.Cmd {
 	if requests == nil {
@@ -236,6 +258,25 @@ func waitForApproval(requests <-chan approval.PendingRequest) bubbletea.Cmd {
 		}
 		return approvalRequestedMsg{Pending: pending}
 	}
+}
+
+func waitForLogNotification(events <-chan logger.LogEvent) bubbletea.Cmd {
+	if events == nil {
+		return nil
+	}
+	return func() bubbletea.Msg {
+		event, ok := <-events
+		if !ok {
+			return nil
+		}
+		return logNotificationMsg{Event: event}
+	}
+}
+
+func clearLogNotificationAfter(id int) bubbletea.Cmd {
+	return bubbletea.Tick(logNotificationTTL, func(time.Time) bubbletea.Msg {
+		return clearLogNotificationMsg{ID: id}
+	})
 }
 
 var (
@@ -278,6 +319,14 @@ var (
 	dashInputStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FAFAFA")).
 			PaddingLeft(1)
+
+	dashNotificationStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FDE68A")).
+				Background(lipgloss.Color("#451A03")).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#F59E0B")).
+				Padding(0, 1).
+				MaxWidth(52)
 )
 
 func (m dashboardModel) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
@@ -285,6 +334,18 @@ func (m dashboardModel) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cm
 	case approvalRequestedMsg:
 		pending := msg.Pending
 		m.pendingApproval = &pending
+		return m, nil
+	case logNotificationMsg:
+		m.nextLogID++
+		m.logNotification = &dashboardLogNotification{
+			ID:    m.nextLogID,
+			Event: msg.Event,
+		}
+		return m, bubbletea.Batch(waitForLogNotification(m.deps.LogNotifications), clearLogNotificationAfter(m.nextLogID))
+	case clearLogNotificationMsg:
+		if m.logNotification != nil && m.logNotification.ID == msg.ID {
+			m.logNotification = nil
+		}
 		return m, nil
 	case bubbletea.WindowSizeMsg:
 		m.width = msg.Width
@@ -504,7 +565,7 @@ func (m dashboardModel) View() string {
 
 	if m.pendingApproval != nil {
 		m.renderApproval(&s)
-		return m.renderCenteredPanel(s.String())
+		return m.renderWithNotification(m.renderCenteredPanel(s.String()))
 	}
 
 	switch m.view {
@@ -520,7 +581,7 @@ func (m dashboardModel) View() string {
 		m.renderSettings(&s)
 	}
 
-	return m.renderCenteredPanel(s.String())
+	return m.renderWithNotification(m.renderCenteredPanel(s.String()))
 }
 
 func (m dashboardModel) renderCenteredPanel(body string) string {
@@ -535,6 +596,58 @@ func (m dashboardModel) renderCenteredPanel(body string) string {
 		}
 	}
 	return centerInTerminal(panel.Render(body), m.width, m.height)
+}
+
+func (m dashboardModel) renderWithNotification(body string) string {
+	if m.logNotification == nil {
+		return body
+	}
+	notification := m.renderLogNotification()
+	if notification == "" {
+		return body
+	}
+	if m.width > 0 {
+		return lipgloss.PlaceHorizontal(m.width, lipgloss.Right, notification) + "\n" + body
+	}
+	return notification + "\n" + body
+}
+
+func (m dashboardModel) renderLogNotification() string {
+	event := m.logNotification.Event
+	label := strings.ToUpper(event.Level.String())
+	switch event.Level.String() {
+	case "warning":
+		label = "WARN"
+	case "error":
+		label = "ERROR"
+	case "fatal":
+		label = "FATAL"
+	case "panic":
+		label = "PANIC"
+	}
+	message := strings.TrimSpace(event.Message)
+	if message == "" {
+		message = "Background log event"
+	}
+	if lipgloss.Width(message) > 46 {
+		message = truncateCells(message, 45) + "…"
+	}
+	return dashNotificationStyle.Render(fmt.Sprintf("⚠ %s  %s", label, message))
+}
+
+func truncateCells(s string, max int) string {
+	if max <= 0 || lipgloss.Width(s) <= max {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		next := b.String() + string(r)
+		if lipgloss.Width(next) > max {
+			break
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func (m dashboardModel) renderApproval(s *strings.Builder) {

@@ -365,9 +365,10 @@ func main() {
 	}
 
 	dashboardMode := len(flag.Args()) == 0
+	var dashboardLogEvents <-chan logger.LogEvent
 	restoreDashboardLogs := func() {}
 	if dashboardMode {
-		restoreDashboardLogs = logger.SuppressInfoAndBelow()
+		dashboardLogEvents, restoreDashboardLogs = logger.CaptureWarningsAndErrors(8)
 		defer restoreDashboardLogs()
 	}
 
@@ -438,6 +439,7 @@ func main() {
 			History:          records,
 			Trusted:          trust.List(),
 			ApprovalRequests: approvalProvider.Requests(),
+			LogNotifications: dashboardLogEvents,
 			DeleteHistory:    func(id string) error { _, err := history.Delete(id); return err },
 			ClearHistory:     history.Clear,
 			ForgetTrusted:    func(query string) error { _, err := trust.Forget(query); return err },
@@ -458,9 +460,6 @@ func main() {
 			}
 			handlers.SetApprovalProvider(nil)
 			SendMode(result.FilePath)
-		case tui.MainActionReceive:
-			handlers.SetApprovalProvider(nil)
-			ReceiveMode()
 		case tui.MainActionWeb:
 			handlers.SetApprovalProvider(nil)
 			WebServerMode(httpServer, port)

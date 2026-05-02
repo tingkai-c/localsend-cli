@@ -3,7 +3,7 @@
 # Contributor: ilius <saeedgnu@riseup.net>
 
 pkgname=localsend-cli
-pkgver=1.3.1
+pkgver=1.3.2
 pkgrel=1
 pkgdesc="CLI implementation of LocalSend protocol in Go (HTTPS-enabled fork)"
 arch=('x86_64' 'aarch64' 'armv7h' 'riscv64')
