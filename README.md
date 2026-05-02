@@ -69,6 +69,20 @@ git clone https://github.com/tingkai-c/localsend-cli.git
 cd localsend-cli && make build
 ```
 
+
+## Interactive TUI dashboard
+
+Run `localsend-cli` with no subcommand to open the Bubble Tea dashboard. The dashboard keeps the LocalSend HTTPS server and discovery broadcast running while giving you terminal-native workflows for:
+
+- sending files/folders/text-compatible payloads;
+- selecting one or multiple nearby recipients (`Space` toggles recipients, `Enter` sends to selected/current);
+- accepting, rejecting, or trusting unknown incoming transfers from an in-TUI approval modal;
+- reviewing/deleting transfer history;
+- reviewing/forgetting trusted senders;
+- viewing settings, paths, Quick Save state, and keybindings.
+
+The TUI intentionally is not a desktop pixel clone: it is a keyboard-first companion that preserves LocalSend v2 protocol compatibility and keeps headless commands excellent.
+
 ## Configuration
 
 Settings are resolved with the precedence **command-line flag > environment variable > config file > built-in default**.
@@ -91,6 +105,12 @@ Examples:
 ```bash
 # One-off: receive into a specific dir without editing the config
 LOCALSEND_CLI_OUTPUT_DIR=/tmp/inbox localsend-cli receive
+
+# Send a short text message as a protocol-compatible text payload
+localsend-cli send-text "hello from the terminal"
+
+# Launch the TUI dashboard
+localsend-cli
 
 # Persistent: edit the config file and uncomment the keys you want to set
 $EDITOR ~/.config/localsend-cli/config.yaml
@@ -118,7 +138,7 @@ Accept files? [y]es / [n]o / [a]lways:
 - No answer within **60 seconds** → reject (sender sees `403`).
 - A second incoming session while the prompt is up gets `409 Blocked by another session`.
 
-For headless / daemon use, the prompt cannot run (no TTY) so unrecognised senders are rejected immediately. Enable `quick_save: true` (or set `LOCALSEND_CLI_QUICK_SAVE=1`, or pass `--quick-save`) to auto-accept everything — equivalent to the pre-1.3 behavior.
+For headless / daemon use, the prompt cannot run (no TTY) so unrecognised senders are rejected immediately. Enable `quick_save: true` (or set `LOCALSEND_CLI_QUICK_SAVE=1`, or pass `--quick-save`) to auto-accept everything — equivalent to the pre-1.3 behavior. When the TUI dashboard is active, unknown sender approval is routed through the dashboard modal instead of stdin, avoiding prompt collisions.
 
 Manage the trust list:
 
@@ -130,6 +150,34 @@ localsend-cli trusted
 localsend-cli forget "Alice's Phone"
 localsend-cli forget a1b2c3d4
 ```
+
+## Transfer history
+
+Completed sends and receives are recorded in a local transfer history file at:
+
+- Linux / WSL: `~/.config/localsend-cli/history.json`
+- macOS: `~/Library/Application Support/localsend-cli/history.json`
+- Windows: `%AppData%\localsend-cli\history.json`
+
+Use the CLI to inspect or clear it:
+
+```bash
+localsend-cli history
+localsend-cli history-clear
+```
+
+The interactive dashboard also exposes transfer history and trusted senders:
+
+- History screen: `j/k` move, `d` deletes the selected record, `c` clears all records.
+- Trusted screen: `j/k` move, `d` or `x` forgets the selected trusted sender.
+
+## Headless/TUI behavior notes
+
+- No subcommand launches the TUI dashboard.
+- `receive` keeps the classic stdin approval prompt for explicit CLI mode.
+- TUI mode installs a channel-backed approval provider so HTTP receive handlers never read stdin while Bubble Tea owns the terminal.
+- Headless unknown senders without Quick Save or prior trust are rejected with `403`; concurrent approval requests return `409`.
+- Transfer progress is emitted as UI-neutral events and rendered by the CLI adapter today; TUI transfer screens can consume the same event stream.
 
 
 ## Star History

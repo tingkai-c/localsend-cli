@@ -13,6 +13,17 @@ import (
 
 // selectDevice 使用 Bubble Tea 库显示可供选择的设备列表并等待用户选择
 func SelectDevice(updates <-chan []models.SendModel) (string, error) {
+	ips, err := SelectDevices(updates)
+	if err != nil || len(ips) == 0 {
+		return "", err
+	}
+	return ips[0], nil
+}
+
+// SelectDevices shows the nearby-device dashboard and supports multi-select.
+// Space toggles recipients; Enter returns all toggled recipients, or the
+// highlighted recipient when none are toggled for single-send compatibility.
+func SelectDevices(updates <-chan []models.SendModel) ([]string, error) {
 	// 创建一个带缓冲的内部 channel
 	internalUpdates := make(chan []models.SendModel, 100)
 
@@ -38,6 +49,7 @@ func SelectDevice(updates <-chan []models.SendModel) (string, error) {
 		devices:    []models.SendModel{},
 		deviceMap:  make(map[string]models.SendModel),
 		sortedKeys: make([]string, 0),
+		selected:   make(map[string]bool),
 		cursor:     0,
 		updates:    internalUpdates,
 	}
@@ -45,13 +57,13 @@ func SelectDevice(updates <-chan []models.SendModel) (string, error) {
 	cmd := bubbletea.NewProgram(initModel)
 	m, err := cmd.Run()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if m, ok := m.(model); ok && len(m.devices) > 0 {
-		return m.devices[m.cursor].IP, nil
+		return m.selectedIPs(), nil
 	}
-	return "", nil
+	return nil, nil
 }
 
 // model 结构体用于 Bubble Tea
@@ -59,6 +71,7 @@ type model struct {
 	devices    []models.SendModel
 	deviceMap  map[string]models.SendModel // 使用 IP 作为键来存储设备
 	sortedKeys []string                    // 保持固定的显示顺序
+	selected   map[string]bool
 	cursor     int
 	updates    <-chan []models.SendModel
 	width      int
@@ -73,6 +86,7 @@ const (
 	DashboardActionMoveUp   DashboardAction = "move_up"
 	DashboardActionMoveDown DashboardAction = "move_down"
 	DashboardActionSelect   DashboardAction = "select"
+	DashboardActionToggle   DashboardAction = "toggle"
 )
 
 // DashboardResult 表示一次仪表盘更新后的结果。
@@ -150,6 +164,18 @@ func (m model) UpdateDashboard(msg bubbletea.Msg) DashboardResult {
 				m.cursor = (m.cursor - 1 + len(m.devices)) % len(m.devices) // 向上移动
 			}
 			return DashboardResult{Action: DashboardActionMoveUp, Model: m}
+		case DashboardActionToggle:
+			if len(m.devices) > 0 {
+				if m.selected == nil {
+					m.selected = make(map[string]bool)
+				}
+				ip := m.devices[m.cursor].IP
+				m.selected[ip] = !m.selected[ip]
+				if !m.selected[ip] {
+					delete(m.selected, ip)
+				}
+			}
+			return DashboardResult{Action: DashboardActionToggle, Model: m}
 		case DashboardActionSelect:
 			return DashboardResult{Action: DashboardActionSelect, Model: m, Cmd: bubbletea.Quit}
 		}
@@ -203,6 +229,8 @@ func dashboardActionFromKey(key string) DashboardAction {
 		return DashboardActionMoveUp
 	case "enter":
 		return DashboardActionSelect
+	case " ":
+		return DashboardActionToggle
 	default:
 		return DashboardActionNone
 	}
@@ -236,7 +264,11 @@ func (m model) View() string {
 	}
 
 	for i, device := range m.devices {
-		line := fmt.Sprintf("  %s  %s", device.DeviceName, subtitleStyle.Render(device.IP))
+		mark := "○"
+		if m.selected[device.IP] {
+			mark = "●"
+		}
+		line := fmt.Sprintf("  %s %s  %s", mark, device.DeviceName, subtitleStyle.Render(device.IP))
 		if m.cursor == i {
 			lines = append(lines, selectedStyle.Render("› "+line))
 			continue
@@ -244,6 +276,22 @@ func (m model) View() string {
 		lines = append(lines, normalStyle.Render("  "+line))
 	}
 
-	lines = append(lines, "", helpStyle.Render("↑/↓ or j/k: navigate • Enter: select • Ctrl+C: quit"))
+	lines = append(lines, "", helpStyle.Render("↑/↓ or j/k: navigate • Space: toggle • Enter: send to selected/current • Ctrl+C: quit"))
 	return panel.Render(strings.Join(lines, "\n"))
+}
+
+func (m model) selectedIPs() []string {
+	if len(m.selected) > 0 {
+		ips := make([]string, 0, len(m.selected))
+		for _, key := range m.sortedKeys {
+			if m.selected[key] {
+				ips = append(ips, key)
+			}
+		}
+		return ips
+	}
+	if len(m.devices) == 0 || m.cursor < 0 || m.cursor >= len(m.devices) {
+		return nil
+	}
+	return []string{m.devices[m.cursor].IP}
 }

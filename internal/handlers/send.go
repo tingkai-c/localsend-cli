@@ -10,13 +10,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/schollz/progressbar/v3"
 	"github.com/tingkai-c/localsend-cli/internal/config"
 	"github.com/tingkai-c/localsend-cli/internal/discovery"
 	"github.com/tingkai-c/localsend-cli/internal/discovery/shared"
+	"github.com/tingkai-c/localsend-cli/internal/history"
 	"github.com/tingkai-c/localsend-cli/internal/models"
+	"github.com/tingkai-c/localsend-cli/internal/transfer"
 	"github.com/tingkai-c/localsend-cli/internal/tui"
 	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 	"github.com/tingkai-c/localsend-cli/internal/utils/sha256"
@@ -35,12 +38,21 @@ func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiv
 			if err != nil {
 				return fmt.Errorf("error calculating SHA256 hash: %w", err)
 			}
+			fileID, err := fileIDForPath(path, filePath)
+			if err != nil {
+				return err
+			}
 			fileMetadata := models.FileInfo{
-				ID:       info.Name(), // 使用文件名作为 ID
-				FileName: info.Name(),
+				ID:       fileID,
+				FileName: fileID,
 				Size:     info.Size(),
 				FileType: filepath.Ext(filePath),
 				SHA256:   sha256Hash,
+			}
+			if fileMetadata.FileType == ".txt" && info.Size() <= 64*1024 {
+				if preview, err := os.ReadFile(filePath); err == nil {
+					fileMetadata.Preview = string(preview)
+				}
 			}
 			files[fileMetadata.ID] = fileMetadata
 		}
@@ -111,8 +123,25 @@ func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiv
 	return &prepareReceiveResponse, nil
 }
 
-// uploadFile 函数
-func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath string) error {
+func fileIDForPath(root, filePath string) (string, error) {
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return "", fmt.Errorf("stat send root: %w", err)
+	}
+	if !rootInfo.IsDir() {
+		return filepath.Base(filePath), nil
+	}
+	rel, err := filepath.Rel(root, filePath)
+	if err != nil {
+		return "", fmt.Errorf("derive relative file id: %w", err)
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid relative file id for %s", filePath)
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+func uploadFileWithEvents(ctx context.Context, jobID string, peer transfer.Peer, sessionId, fileId, token, filePath string, events transfer.EventSink) error {
 	// 打开要发送的文件
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -126,6 +155,7 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 		return fmt.Errorf("error getting file info: %w", err)
 	}
 	fileSize := fileInfo.Size()
+	events.Emit(transfer.Event{Kind: transfer.EventItemStarted, JobID: jobID, Peer: peer, ItemID: fileId, TotalBytes: fileSize})
 
 	// Create progress bar
 	bar := progressbar.NewOptions64(
@@ -153,7 +183,7 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 
 	// 构建文件上传的 URL
 	uploadURL := fmt.Sprintf("https://%s:53317/api/localsend/v2/upload?sessionId=%s&fileId=%s&token=%s",
-		ip, sessionId, fileId, token)
+		peer.IP, sessionId, fileId, token)
 
 	// 使用 pipe 来避免将整个文件加载到内存中
 	pr, pw := io.Pipe()
@@ -161,10 +191,11 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 	// 创建一个错误通道来传递上传过程中的错误
 	uploadErr := make(chan error, 1)
 
+	progress := &transferProgressWriter{jobID: jobID, peer: peer, itemID: fileId, total: fileSize, events: events}
 	go func() {
 		defer pw.Close()
 		// 在新的 goroutine 中写入文件数据
-		_, err := io.Copy(io.MultiWriter(pw, bar), file)
+		_, err := io.Copy(io.MultiWriter(pw, bar, progress), file)
 		if err != nil {
 			uploadErr <- err
 			return
@@ -199,6 +230,7 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 	// 检查是否被取消
 	select {
 	case <-ctx.Done():
+		events.Emit(transfer.Event{Kind: transfer.EventCanceled, JobID: jobID, Peer: peer, ItemID: fileId, Err: ctx.Err()})
 		return fmt.Errorf("transfer canceled")
 	case err := <-uploadErr:
 		if err != nil {
@@ -227,55 +259,156 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 
 	fmt.Println()
 	logger.Success("File uploaded successfully")
+	events.Emit(transfer.Event{Kind: transfer.EventItemCompleted, JobID: jobID, Peer: peer, ItemID: fileId, Bytes: fileSize, TotalBytes: fileSize})
 	return nil
+}
+
+type transferProgressWriter struct {
+	jobID  string
+	peer   transfer.Peer
+	itemID string
+	total  int64
+	sent   int64
+	events transfer.EventSink
+}
+
+func (w *transferProgressWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	w.sent += int64(n)
+	w.events.Emit(transfer.Event{Kind: transfer.EventBytesTransferred, JobID: w.jobID, Peer: w.peer, ItemID: w.itemID, Bytes: w.sent, TotalBytes: w.total})
+	return n, nil
 }
 
 // SendFile 函数
 func SendFile(path string) error {
 	updates := make(chan []models.SendModel)
 	discovery.ListenAndStartBroadcasts(updates)
-	fmt.Println("Please select a device you want to send a file to:")
-	ip, err := tui.SelectDevice(updates)
+	fmt.Println("Select recipients. Space toggles multiple devices; Enter sends to selected/current device:")
+	ips, err := tui.SelectDevices(updates)
 	if err != nil {
 		return err
 	}
-	response, err := SendFileToOtherDevicePrepare(ip, path)
-	if err != nil {
-		return err
+	if len(ips) == 0 {
+		return fmt.Errorf("no recipient selected")
 	}
+	peers := make([]transfer.Peer, 0, len(ips))
+	for _, ip := range ips {
+		peers = append(peers, transfer.Peer{IP: ip})
+	}
+	result := SendFileToRecipients(context.Background(), peers, path, cliEventSink())
+	if result.Status() == transfer.StatusFailed {
+		return fmt.Errorf("all recipients failed")
+	}
+	if result.Status() == transfer.StatusPartialSuccess {
+		return fmt.Errorf("some recipients failed")
+	}
+	return nil
+}
 
-	// 创建一个用于取消的 context
-	ctx, cancel := context.WithCancel(context.Background())
+func SendFileToRecipients(ctx context.Context, peers []transfer.Peer, path string, events transfer.EventSink) transfer.Result {
+	started := time.Now().UTC()
+	jobID := fmt.Sprintf("send-%d", started.UnixNano())
+	result := transfer.Result{JobID: jobID, StartedAt: started}
+	events.Emit(transfer.Event{Kind: transfer.EventJobStarted, JobID: jobID, TotalBytes: totalBytes(path)})
+	for _, peer := range peers {
+		recipient := sendFileToRecipient(ctx, jobID, peer, path, events)
+		result.Recipients = append(result.Recipients, recipient)
+	}
+	result.FinishedAt = time.Now().UTC()
+	return result
+}
+
+func sendFileToRecipient(ctx context.Context, jobID string, peer transfer.Peer, path string, events transfer.EventSink) transfer.RecipientResult {
+	response, err := SendFileToOtherDevicePrepare(peer.IP, path)
+	if err != nil {
+		events.Emit(transfer.Event{Kind: transfer.EventRecipientFailed, JobID: jobID, Peer: peer, Err: err})
+		recordSendFailure(path, peer.IP, err)
+		return transfer.RecipientResult{Peer: peer, Error: err}
+	}
+	events.Emit(transfer.Event{Kind: transfer.EventRecipientPrepared, JobID: jobID, Peer: peer})
+
+	recipientCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	// 使用共享的 HTTP 服务器来处理取消请求
 	logger.Info("Registering cancel handler for session: ", response.SessionID)
 	RegisterCancelHandler(response.SessionID, cancel)
 	defer UnregisterCancelHandler(response.SessionID)
 
-	// 遍历目录和子文件
+	var sentItems []transfer.Item
 	err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() {
-			fileId := info.Name()
-			token, ok := response.Files[fileId]
-			if !ok {
-				return fmt.Errorf("token not found for file: %s", fileId)
-			}
-			err = uploadFile(ctx, ip, response.SessionID, fileId, token, filePath)
-			if err != nil {
-				return fmt.Errorf("error uploading file: %w", err)
-			}
+		if info.IsDir() {
+			return nil
+		}
+		fileID, err := fileIDForPath(path, filePath)
+		if err != nil {
+			return err
+		}
+		token, ok := response.Files[fileID]
+		if !ok {
+			return fmt.Errorf("token not found for file: %s", fileID)
+		}
+		if err := uploadFileWithEvents(recipientCtx, jobID, peer, response.SessionID, fileID, token, filePath, events); err != nil {
+			return fmt.Errorf("error uploading file: %w", err)
+		}
+		sentItems = append(sentItems, transfer.Item{ID: fileID, Name: info.Name(), Path: filePath, Size: info.Size(), FileType: filepath.Ext(filePath)})
+		if _, err := history.Add(history.Record{
+			Direction: history.DirectionSent,
+			Status:    history.StatusCompleted,
+			FileName:  info.Name(),
+			Path:      filePath,
+			Size:      info.Size(),
+			PeerIP:    peer.IP,
+		}); err != nil {
+			logger.Warnf("Failed to record send history: %v", err)
 		}
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("error walking the path: %w", err)
+		events.Emit(transfer.Event{Kind: transfer.EventRecipientFailed, JobID: jobID, Peer: peer, Err: err})
+		recordSendFailure(path, peer.IP, err)
+		return transfer.RecipientResult{Peer: peer, Items: sentItems, Error: err}
 	}
+	events.Emit(transfer.Event{Kind: transfer.EventRecipientComplete, JobID: jobID, Peer: peer})
+	return transfer.RecipientResult{Peer: peer, Items: sentItems}
+}
 
-	return nil
+func cliEventSink() transfer.EventSink {
+	return func(event transfer.Event) {
+		switch event.Kind {
+		case transfer.EventRecipientPrepared:
+			logger.Infof("Prepared recipient %s", event.Peer.IP)
+		case transfer.EventRecipientFailed:
+			logger.Errorf("Recipient %s failed: %v", event.Peer.IP, event.Err)
+		case transfer.EventRecipientComplete:
+			logger.Success("Recipient complete: ", event.Peer.IP)
+		}
+	}
+}
+
+func totalBytes(path string) int64 {
+	var total int64
+	_ = filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
+}
+
+func recordSendFailure(path, peerIP string, sendErr error) {
+	if _, err := history.Add(history.Record{
+		Direction: history.DirectionSent,
+		Status:    history.StatusFailed,
+		FileName:  filepath.Base(path),
+		Path:      path,
+		PeerIP:    peerIP,
+		Error:     sendErr.Error(),
+	}); err != nil {
+		logger.Warnf("Failed to record failed send history: %v", err)
+	}
 }
 
 func NormalSendHandler(w http.ResponseWriter, r *http.Request) {

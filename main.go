@@ -12,345 +12,20 @@ import (
 	"strings"
 	"syscall"
 
-	bubbletea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	qrcode "github.com/skip2/go-qrcode"
+	"github.com/tingkai-c/localsend-cli/internal/approval"
 	"github.com/tingkai-c/localsend-cli/internal/config"
 	"github.com/tingkai-c/localsend-cli/internal/discovery"
 	"github.com/tingkai-c/localsend-cli/internal/discovery/shared"
 	"github.com/tingkai-c/localsend-cli/internal/handlers"
+	"github.com/tingkai-c/localsend-cli/internal/history"
 	"github.com/tingkai-c/localsend-cli/internal/pkg/server"
 	"github.com/tingkai-c/localsend-cli/internal/trust"
+	"github.com/tingkai-c/localsend-cli/internal/tui"
 	"github.com/tingkai-c/localsend-cli/internal/utils/cert"
 	"github.com/tingkai-c/localsend-cli/internal/utils/logger"
 	"github.com/tingkai-c/localsend-cli/static"
 )
-
-type textInputModel struct {
-	value       string
-	cursor      int
-	placeholder string
-	done        bool
-}
-
-func initialTextInputModel() textInputModel {
-	return textInputModel{
-		value:       "",
-		cursor:      0,
-		placeholder: "Enter file path...",
-		done:        false,
-	}
-}
-
-func (m textInputModel) Init() bubbletea.Cmd {
-	return nil
-}
-
-func getPathSuggestions(input string) []string {
-	if input == "" {
-		input = "."
-	}
-
-	dir := input
-	if !strings.HasSuffix(input, string(os.PathSeparator)) {
-		dir = filepath.Dir(input)
-	}
-
-	files, err := filepath.Glob(filepath.Join(dir, "*"))
-	if err != nil {
-		return nil
-	}
-
-	prefix := filepath.Clean(input)
-	var suggestions []string
-	for _, file := range files {
-		if strings.HasPrefix(filepath.Clean(file), prefix) {
-			suggestions = append(suggestions, file)
-		}
-	}
-	return suggestions
-}
-
-func (m textInputModel) Update(msg bubbletea.Msg) (textInputModel, bubbletea.Cmd) {
-	switch msg := msg.(type) {
-	case bubbletea.MouseMsg:
-		// 忽略鼠标事件
-		return m, nil
-
-	case bubbletea.KeyMsg:
-		switch msg.String() {
-		case "backspace":
-			if m.cursor > 0 {
-				m.value = m.value[:m.cursor-1] + m.value[m.cursor:]
-				m.cursor--
-			}
-		case "left":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "right":
-			if m.cursor < len(m.value) {
-				m.cursor++
-			}
-		case "tab":
-			suggestions := getPathSuggestions(m.value)
-			if len(suggestions) > 0 {
-				m.value = suggestions[0]
-				m.cursor = len(m.value)
-			}
-		case "home":
-			m.cursor = 0
-		case "end":
-			m.cursor = len(m.value)
-		case "up", "down":
-			// Ignore up and down key+s
-
-		case "enter":
-			m.done = true
-
-		default:
-			if msg.String() != "enter" && msg.String() != "home" && msg.String() != "end" {
-				// 只允许输入有效的路径字符
-				char := msg.String()
-				// 检查是否是有效的路径字符
-				if char == "." || char == "/" || char == "\\" || char == ":" || char == "-" || char == "_" ||
-					(char >= "a" && char <= "z") || (char >= "A" && char <= "Z") || (char >= "0" && char <= "9") {
-					m.value = m.value[:m.cursor] + char + m.value[m.cursor:]
-					m.cursor++
-				}
-			}
-		}
-	}
-	return m, nil
-}
-
-func (m textInputModel) View() string {
-	if len(m.value) == 0 {
-		return m.placeholder
-	}
-	value := m.value
-	cursor := m.cursor
-	if cursor > len(value) {
-		cursor = len(value)
-	}
-	return value[:cursor] + "_" + value[cursor:]
-}
-
-func (m textInputModel) Value() string {
-	return m.value
-}
-
-type model struct {
-	mode        string
-	choices     []string
-	cursor      int
-	filePrompt  bool
-	textInput   textInputModel
-	suggestions []string
-}
-
-type appMode int
-
-const (
-	modeInteractive appMode = iota
-	modeWeb
-	modeSend
-	modeReceive
-	modeForget
-	modeTrusted
-	modeHelp
-	modeExit
-)
-
-type appCommand struct {
-	mode appMode
-	arg  string
-}
-
-var tuiModes = map[string]appMode{
-	"📤 Send":    modeSend,
-	"📥 Receive": modeReceive,
-	"🌎 Web":     modeWeb,
-	"❌ Exit":    modeExit,
-}
-
-func initialModel() model {
-	return model{
-		mode:      "",
-		choices:   []string{"📤 Send", "📥 Receive", "🌎 Web", "❌ Exit"},
-		cursor:    0,
-		textInput: initialTextInputModel(),
-	}
-}
-
-func (m model) Init() bubbletea.Cmd {
-	return m.textInput.Init()
-}
-
-var (
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#7571F9")).
-			Border(lipgloss.RoundedBorder()).
-			Padding(0, 2).
-			MarginBottom(1)
-
-	menuStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA")).
-			PaddingLeft(4)
-
-	selectedItemStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7571F9")).
-				PaddingLeft(2).
-				SetString("❯ ")
-
-	unselectedItemStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FAFAFA")).
-				PaddingLeft(4)
-
-	inputPromptStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7571F9")).
-				PaddingLeft(2)
-
-	inputStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA")).
-			PaddingLeft(1)
-)
-
-func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
-	switch msg := msg.(type) {
-	case bubbletea.MouseMsg:
-		if msg.Type == bubbletea.MouseLeft {
-			if msg.Y > 3 && msg.Y <= len(m.choices)+3 {
-				m.cursor = msg.Y - 4
-				m.mode = m.choices[m.cursor]
-				if m.mode == "📤 Send" {
-					m.filePrompt = true
-					return m, nil
-				} else {
-					return m, bubbletea.Quit
-				}
-			}
-		}
-
-	case bubbletea.KeyMsg:
-		if m.filePrompt {
-			if msg.String() == "ctrl+c" {
-				m.mode = "❌ Exit"
-				return m, bubbletea.Quit
-			}
-			m.textInput, _ = m.textInput.Update(msg)
-			if m.textInput.done {
-				m.mode = "📤 Send"
-				return m, bubbletea.Quit
-			}
-			m.suggestions = getPathSuggestions(m.textInput.value)
-			switch msg.String() {
-			case "tab":
-				if len(m.suggestions) > 0 {
-					if m.cursor >= len(m.suggestions)-1 {
-						m.cursor = 0
-					} else {
-						m.cursor++
-					}
-					m.textInput.value = m.suggestions[m.cursor]
-				}
-			}
-			return m, nil
-		}
-
-		switch msg.String() {
-		case "ctrl+c", "q":
-			m.mode = "❌ Exit"
-			return m, bubbletea.Quit
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "down", "j":
-			if m.cursor < len(m.choices)-1 {
-				m.cursor++
-			}
-		case "g":
-			m.cursor = 0
-		case "G":
-			m.cursor = len(m.choices) - 1
-		case "enter":
-			if m.filePrompt {
-				m.textInput, _ = m.textInput.Update(msg)
-				if m.textInput.done {
-					m.mode = "📤 Send"
-					return m, bubbletea.Quit
-				}
-				return m, nil
-			} else {
-				m.mode = m.choices[m.cursor]
-				if m.mode == "📤 Send" {
-					m.filePrompt = true
-					return m, nil
-				} else {
-					return m, bubbletea.Quit
-				}
-			}
-		case "backspace", "tab":
-			if m.filePrompt {
-				m.textInput, _ = m.textInput.Update(msg)
-				return m, nil
-			}
-		case "esc":
-			if m.filePrompt {
-				m.filePrompt = false
-				m.textInput = initialTextInputModel()
-			}
-		default:
-			if m.filePrompt {
-				m.textInput, _ = m.textInput.Update(msg)
-				return m, nil
-			}
-		}
-	}
-	return m, nil
-}
-
-func (m model) View() string {
-	var s strings.Builder
-
-	s.WriteString(titleStyle.Render("LocalSend CLI"))
-	s.WriteString("\n")
-	s.WriteString(menuStyle.Render("Receiver is ready for Quick Save and trusted senders"))
-	s.WriteString("\n")
-	s.WriteString(menuStyle.Render(fmt.Sprintf("Device: %s  Port: %d", config.ConfigData.NameOfDevice, config.ConfigData.Port)))
-	s.WriteString("\n")
-	s.WriteString(menuStyle.Render("Output: " + config.ConfigData.OutputDir))
-	s.WriteString("\n\n")
-
-	if m.mode == "" {
-		s.WriteString(inputPromptStyle.Render("Choose an action"))
-		s.WriteString("\n")
-		for i, choice := range m.choices {
-			if i == m.cursor {
-				s.WriteString(selectedItemStyle.Render(choice))
-			} else {
-				s.WriteString(unselectedItemStyle.Render(choice))
-			}
-			s.WriteString("\n")
-		}
-		s.WriteString("\n")
-		s.WriteString(menuStyle.Render("↑/↓ or j/k: navigate • Enter: select • q/Ctrl+C: quit"))
-	} else {
-		s.WriteString(menuStyle.Render(m.mode))
-		s.WriteString("\n\n")
-
-		if m.filePrompt {
-			s.WriteString(inputPromptStyle.Render("Enter file path: "))
-			s.WriteString(inputStyle.Render(m.textInput.View()))
-			s.WriteString("\n")
-			s.WriteString(menuStyle.Render("Tab: complete path • Esc: back • Ctrl+C: quit"))
-		}
-	}
-
-	return s.String()
-}
 
 func WebServerMode(httpServer *http.ServeMux, port int) {
 	err := os.MkdirAll(config.ConfigData.OutputDir, 0o755)
@@ -403,6 +78,21 @@ func SendMode(filePath string) {
 	}
 }
 
+func SendTextMode(message string) {
+	dir, err := os.MkdirTemp("", "localsend-cli-text-*")
+	if err != nil {
+		logger.Errorf("Failed to create temporary text payload: %v", err)
+		ExitMode()
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "message.txt")
+	if err := os.WriteFile(path, []byte(message), 0o600); err != nil {
+		logger.Errorf("Failed to write temporary text payload: %v", err)
+		ExitMode()
+	}
+	SendMode(path)
+}
+
 func ExitMode() {
 	fmt.Println("Exiting program...")
 	os.Exit(0)
@@ -419,13 +109,17 @@ func waitForInterrupt(message string) {
 // showUsage prints the CLI help. Defined at package scope so it can be wired
 // into flag.Usage before flag.Parse runs.
 func showUsage() {
-	fmt.Println("Usage: <command> [arguments]")
+	fmt.Println("Usage: localsend-cli [command] [arguments]")
+	fmt.Println("Run without a command to open the interactive TUI dashboard.")
 	fmt.Println("Commands:")
 	fmt.Println("  web                       Start Web mode")
-	fmt.Println("  send <file_path>          Start Send mode (file path required)")
+	fmt.Println("  send <file_path>          Send file/folder; TUI selector supports multi-recipient Space toggles")
+	fmt.Println("  send-text <message>       Send text as a LocalSend-compatible text file")
 	fmt.Println("  receive                   Start Receive mode")
 	fmt.Println("  forget <alias|fingerprint> Remove a sender from the trust list")
 	fmt.Println("  trusted                   List trusted senders")
+	fmt.Println("  history                   List transfer history")
+	fmt.Println("  history-clear             Clear transfer history")
 	fmt.Println("  help                      Display this help information")
 	fmt.Println("Options:")
 	fmt.Println("  --help                    Display this help information")
@@ -471,6 +165,12 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 		SendMode(args[1])
 	case "receive":
 		ReceiveMode()
+	case "send-text":
+		if len(args) < 2 {
+			logger.Error("Need text message")
+			ExitMode()
+		}
+		SendTextMode(strings.Join(args[1:], " "))
 	case "forget":
 		if len(args) < 2 {
 			logger.Error("Need alias or fingerprint to forget")
@@ -479,6 +179,10 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 		ForgetMode(args[1])
 	case "trusted":
 		ListTrustedMode()
+	case "history":
+		ListHistoryMode()
+	case "history-clear":
+		ClearHistoryMode()
 	case "help":
 		showUsage()
 		ExitMode()
@@ -526,6 +230,53 @@ func ListTrustedMode() {
 		}
 		fmt.Printf("  %s  %s  added %s\n", e.Fingerprint, alias, e.AddedAt.Format("2006-01-02"))
 	}
+}
+
+// ListHistoryMode prints persisted transfer history.
+func ListHistoryMode() {
+	records, err := history.List()
+	if err != nil {
+		logger.Errorf("Failed to load history: %v", err)
+		ExitMode()
+	}
+	if len(records) == 0 {
+		fmt.Println("No transfer history.")
+		return
+	}
+	fmt.Printf("Transfer history (%s):\n", history.Path())
+	for _, record := range records {
+		peer := record.PeerAlias
+		if peer == "" {
+			peer = record.PeerIP
+		}
+		if peer == "" {
+			peer = "unknown peer"
+		}
+		when := record.CompletedAt.Format("2006-01-02 15:04:05")
+		fmt.Printf("  %s  %-8s %-9s %8s  %-24s  %s\n", when, record.Direction, record.Status, humanBytes(record.Size), peer, record.FileName)
+	}
+}
+
+// ClearHistoryMode removes all transfer history records.
+func ClearHistoryMode() {
+	if err := history.Clear(); err != nil {
+		logger.Errorf("Failed to clear history: %v", err)
+		ExitMode()
+	}
+	fmt.Println("Transfer history cleared.")
+}
+
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for x := n / unit; x >= unit; x /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 var (
@@ -587,6 +338,13 @@ func main() {
 	// without spinning up the cert + HTTPS server.
 	if args := flag.Args(); len(args) > 0 {
 		switch args[0] {
+		case "send-text":
+			if len(args) < 2 {
+				logger.Error("Need text message")
+				ExitMode()
+			}
+			SendTextMode(strings.Join(args[1:], " "))
+			return
 		case "forget":
 			if len(args) < 2 {
 				logger.Error("Need alias or fingerprint to forget")
@@ -596,6 +354,12 @@ func main() {
 			return
 		case "trusted":
 			ListTrustedMode()
+			return
+		case "history":
+			ListHistoryMode()
+			return
+		case "history-clear":
+			ClearHistoryMode()
 			return
 		}
 	}
@@ -648,32 +412,48 @@ func main() {
 
 	if !flagOpen {
 		discovery.ListenAndStartBroadcasts(nil)
-		handlers.SetDashboardActive(true)
-		defer handlers.SetDashboardActive(false)
+		approvalProvider := approval.NewChannelProvider(1)
+		handlers.SetApprovalProvider(approvalProvider)
+		defer handlers.SetApprovalProvider(nil)
 
-		p := bubbletea.NewProgram(initialModel())
-		m, err := p.Run()
+		records, err := history.List()
+		if err != nil {
+			logger.Warnf("Failed to load transfer history for dashboard: %v", err)
+		}
+		result, err := tui.RunMain(tui.MainDeps{
+			DeviceName:       config.ConfigData.NameOfDevice,
+			Port:             config.ConfigData.Port,
+			OutputDir:        config.ConfigData.OutputDir,
+			QuickSave:        config.ConfigData.QuickSave,
+			ConfigPath:       config.ConfigPath(),
+			HistoryPath:      history.Path(),
+			TrustPath:        trust.Path(),
+			History:          records,
+			Trusted:          trust.List(),
+			ApprovalRequests: approvalProvider.Requests(),
+			DeleteHistory:    func(id string) error { _, err := history.Delete(id); return err },
+			ClearHistory:     history.Clear,
+			ForgetTrusted:    func(query string) error { _, err := trust.Forget(query); return err },
+		})
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		mTyped := m.(model)
-		switch tuiModes[mTyped.mode] {
-		case modeExit:
+		switch result.Action {
+		case tui.MainActionExit, tui.MainActionNone:
 			ExitMode()
-		case modeSend:
-			filePath := mTyped.textInput.Value()
-			if filePath == "" {
+		case tui.MainActionSend:
+			if result.FilePath == "" {
 				fmt.Println("Send mode requires a file path")
 				os.Exit(1)
 			}
-			handlers.SetDashboardActive(false)
-			SendMode(filePath)
-		case modeReceive:
-			handlers.SetDashboardActive(false)
+			handlers.SetApprovalProvider(nil)
+			SendMode(result.FilePath)
+		case tui.MainActionReceive:
+			handlers.SetApprovalProvider(nil)
 			ReceiveMode()
-		case modeWeb:
-			handlers.SetDashboardActive(false)
+		case tui.MainActionWeb:
+			handlers.SetApprovalProvider(nil)
 			WebServerMode(httpServer, port)
 		}
 	}

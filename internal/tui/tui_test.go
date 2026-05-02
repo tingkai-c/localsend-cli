@@ -80,6 +80,7 @@ func TestDashboardActionFromKeyMappings(t *testing.T) {
 		"ctrl+c": DashboardActionQuit,
 		"q":      DashboardActionQuit,
 		"enter":  DashboardActionSelect,
+		" ":      DashboardActionToggle,
 		"j":      DashboardActionMoveDown,
 		"k":      DashboardActionMoveUp,
 		"noop":   DashboardActionNone,
@@ -126,5 +127,28 @@ func TestUpdateDashboardEnterSelects(t *testing.T) {
 	}
 	if _, ok := result.Cmd().(bubbletea.QuitMsg); !ok {
 		t.Fatalf("expected QuitMsg from enter, got %T", result.Cmd())
+	}
+}
+
+func TestDeviceDashboardToggleMultiSelect(t *testing.T) {
+	m := model{
+		devices: []models.SendModel{
+			{IP: "192.168.1.10", DeviceName: "MacBook Pro"},
+			{IP: "192.168.1.22", DeviceName: "Steam Deck"},
+		},
+		sortedKeys: []string{"192.168.1.10", "192.168.1.22"},
+		selected:   map[string]bool{},
+	}
+	result := m.UpdateDashboard(bubbletea.KeyMsg{Type: bubbletea.KeySpace})
+	if result.Action != DashboardActionToggle {
+		t.Fatalf("expected toggle action, got %q", result.Action)
+	}
+	if got := result.Model.selectedIPs(); len(got) != 1 || got[0] != "192.168.1.10" {
+		t.Fatalf("selected IPs = %#v", got)
+	}
+	result = result.Model.UpdateDashboard(bubbletea.KeyMsg{Type: bubbletea.KeyDown})
+	result = result.Model.UpdateDashboard(bubbletea.KeyMsg{Type: bubbletea.KeySpace})
+	if got := result.Model.selectedIPs(); len(got) != 2 || got[0] != "192.168.1.10" || got[1] != "192.168.1.22" {
+		t.Fatalf("selected IPs = %#v", got)
 	}
 }

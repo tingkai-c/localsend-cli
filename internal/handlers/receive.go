@@ -11,10 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/tingkai-c/localsend-cli/internal/approval"
 	"github.com/tingkai-c/localsend-cli/internal/config"
+	"github.com/tingkai-c/localsend-cli/internal/history"
 	"github.com/tingkai-c/localsend-cli/internal/models"
 	"github.com/tingkai-c/localsend-cli/internal/prompt"
 	"github.com/tingkai-c/localsend-cli/internal/trust"
@@ -25,25 +26,44 @@ import (
 )
 
 var (
-	sessionIDCounter  = 0
-	sessionMutex      sync.Mutex
-	receiveSessions   = make(map[string]receiveSession)
-	receiveSessionsMu sync.RWMutex
-	dashboardActive   atomic.Bool
+	sessionIDCounter   = 0
+	sessionMutex       sync.Mutex
+	receiveSessions    = make(map[string]receiveSession)
+	receiveSessionsMu  sync.RWMutex
+	approvalProviderMu sync.RWMutex
+	approvalProvider   approval.Provider = approval.NewManager(approval.StdinProvider{}, prompt.DefaultTimeout)
 )
 
 type receiveSession struct {
-	fileNames map[string]string // fileID -> fileName
-	tokens    map[string]string // fileID -> expected token
+	fileNames   map[string]string // fileID -> fileName
+	tokens      map[string]string // fileID -> expected token
+	peerAlias   string
+	fingerprint string
 }
 
-var errUserRejected = errors.New("user rejected")
-
-// SetDashboardActive prevents HTTP receive handlers from opening a stdin
-// approval prompt while the Bubble Tea dashboard owns the terminal.
-func SetDashboardActive(active bool) {
-	dashboardActive.Store(active)
+// SetApprovalProvider replaces the interactive approval provider. Passing nil
+// restores the stdin provider used by explicit CLI receive mode. TUI callers
+// install a channel provider so HTTP handlers never read stdin while Bubble Tea
+// owns the terminal.
+func SetApprovalProvider(provider approval.Provider) {
+	approvalProviderMu.Lock()
+	defer approvalProviderMu.Unlock()
+	if provider == nil {
+		approvalProvider = approval.NewManager(approval.StdinProvider{}, prompt.DefaultTimeout)
+		return
+	}
+	approvalProvider = approval.NewManager(provider, prompt.DefaultTimeout)
 }
+
+func currentApprovalProvider() approval.Provider {
+	approvalProviderMu.RLock()
+	defer approvalProviderMu.RUnlock()
+	return approvalProvider
+}
+
+// SetDashboardActive is retained for callers compiled against older package
+// versions. Approval routing is now controlled by SetApprovalProvider.
+func SetDashboardActive(active bool) {}
 
 func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	var req models.PrepareReceiveRequest
@@ -55,7 +75,7 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 
 	logger.Infof("Received request from %s,device is %s", req.Info.Alias, req.Info.DeviceModel)
 
-	authErr := authorizeIncoming(req.Info.Alias, req.Info.Fingerprint, req.Files)
+	authErr := authorizeIncoming(r.Context(), req.Info.Alias, req.Info.Fingerprint, req.Files)
 	if authErr != nil {
 		// authorizeIncoming logs the reason; HTTP status was set there.
 		writeAuthError(w, authErr)
@@ -81,8 +101,10 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	}
 	receiveSessionsMu.Lock()
 	receiveSessions[sessionID] = receiveSession{
-		fileNames: fileNames,
-		tokens:    responseTokens,
+		fileNames:   fileNames,
+		tokens:      responseTokens,
+		peerAlias:   req.Info.Alias,
+		fingerprint: req.Info.Fingerprint,
 	}
 	receiveSessionsMu.Unlock()
 
@@ -96,12 +118,12 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 
 func writeAuthError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, prompt.ErrBusy):
+	case errors.Is(err, approval.ErrBusy), errors.Is(err, prompt.ErrBusy):
 		http.Error(w, "blocked by another session", http.StatusConflict)
-	case errors.Is(err, prompt.ErrTimeout):
+	case errors.Is(err, approval.ErrTimeout), errors.Is(err, prompt.ErrTimeout):
 		http.Error(w, "approval timed out", http.StatusForbidden)
-	case errors.Is(err, prompt.ErrNoTTY):
-		http.Error(w, "receiver requires Quick Save for headless use", http.StatusForbidden)
+	case errors.Is(err, approval.ErrNoTTY), errors.Is(err, approval.ErrNoProvider), errors.Is(err, prompt.ErrNoTTY):
+		http.Error(w, "receiver requires Quick Save, trust, or TUI approval for headless use", http.StatusForbidden)
 	default:
 		http.Error(w, "rejected", http.StatusForbidden)
 	}
@@ -111,52 +133,55 @@ func writeAuthError(w http.ResponseWriter, err error) {
 // precedence (each step short-circuits acceptance):
 //  1. Quick Save bypasses every check.
 //  2. A previously-trusted fingerprint bypasses the prompt.
-//  3. No TTY -> reject without prompting (avoids hanging headless servers).
-//  4. Otherwise prompt the user; persist the fingerprint on "Always".
-func authorizeIncoming(alias, fingerprint string, files map[string]models.FileInfo) error {
-	if config.ConfigData.QuickSave {
-		return nil
+//  3. The configured approval provider decides unknown senders.
+//  4. No provider / no TTY / timeout rejects safely without hanging.
+func authorizeIncoming(ctx context.Context, alias, fingerprint string, files map[string]models.FileInfo) error {
+	request := approval.Request{
+		Alias:       alias,
+		Fingerprint: fingerprint,
+		Files:       approvalFiles(files),
 	}
-	if trust.IsTrusted(fingerprint) {
-		logger.Infof("Auto-accepting trusted fingerprint %s (%s)", shortFP(fingerprint), alias)
-		return nil
-	}
-	if dashboardActive.Load() {
-		logger.Warn("Rejecting incoming session: approval is required while the dashboard owns the terminal. Open Receive mode, enable Quick Save, or trust this sender first.")
-		return prompt.ErrNoTTY
-	}
-	if !prompt.IsTTY() {
-		logger.Warn("Rejecting incoming session: stdin is not a TTY and quick_save is OFF. Set quick_save: true (or trust this sender once interactively) to receive on this host.")
-		return prompt.ErrNoTTY
-	}
-
-	summaries := make([]prompt.FileSummary, 0, len(files))
-	for _, f := range files {
-		summaries = append(summaries, prompt.FileSummary{Name: f.FileName, Size: f.Size})
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), prompt.DefaultTimeout)
-	defer cancel()
-	decision, err := prompt.AskApproval(ctx, alias, fingerprint, summaries)
+	decision, err := (approval.Policy{
+		QuickSave: config.ConfigData.QuickSave,
+		Trust:     receiveTrustStore{},
+		Provider:  currentApprovalProvider(),
+		Timeout:   prompt.DefaultTimeout,
+	}).Authorize(ctx, request)
 	if err != nil {
-		logger.Infof("Approval prompt error: %v", err)
+		switch {
+		case errors.Is(err, approval.ErrNoTTY), errors.Is(err, approval.ErrNoProvider):
+			logger.Warn("Rejecting incoming session: approval is required but no interactive approval provider is available. Use TUI, open Receive mode with a TTY, enable Quick Save, or trust this sender first.")
+		case errors.Is(err, approval.ErrTimeout):
+			logger.Infof("Approval timed out for %s (%s)", alias, shortFP(fingerprint))
+		case errors.Is(err, approval.ErrBusy):
+			logger.Infof("Approval busy for %s (%s)", alias, shortFP(fingerprint))
+		default:
+			logger.Infof("Incoming transfer rejected for %s (%s): %v", alias, shortFP(fingerprint), err)
+		}
 		return err
 	}
-	switch decision {
-	case prompt.AcceptAlways:
-		if err := trust.Add(fingerprint, alias); err != nil {
-			// Persisting failed but the user said yes; honor the answer for
-			// this session and warn so they can investigate.
-			logger.Errorf("Failed to persist trust for %s: %v", alias, err)
-		} else {
-			logger.Infof("Trusted %s (%s) for future sessions", alias, shortFP(fingerprint))
+	switch decision.Action {
+	case approval.AcceptAlways:
+		logger.Infof("Trusted %s (%s) for future sessions", alias, shortFP(fingerprint))
+	case approval.Accept:
+		if decision.Reason == "trusted" {
+			logger.Infof("Auto-accepting trusted fingerprint %s (%s)", shortFP(fingerprint), alias)
 		}
-		return nil
-	case prompt.Accept:
-		return nil
-	default:
-		return errUserRejected
 	}
+	return nil
+}
+
+type receiveTrustStore struct{}
+
+func (receiveTrustStore) IsTrusted(fingerprint string) bool   { return trust.IsTrusted(fingerprint) }
+func (receiveTrustStore) Add(fingerprint, alias string) error { return trust.Add(fingerprint, alias) }
+
+func approvalFiles(files map[string]models.FileInfo) []approval.File {
+	summaries := make([]approval.File, 0, len(files))
+	for _, f := range files {
+		summaries = append(summaries, approval.File{Name: f.FileName, Size: f.Size})
+	}
+	return summaries
 }
 
 func shortFP(fp string) string {
@@ -164,6 +189,29 @@ func shortFP(fp string) string {
 		return fp[:12] + "…"
 	}
 	return fp
+}
+
+func safeOutputPath(outputDir, fileName string) (string, error) {
+	if strings.TrimSpace(fileName) == "" {
+		return "", fmt.Errorf("empty file name")
+	}
+	cleanName := filepath.Clean(fileName)
+	if filepath.IsAbs(cleanName) || cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unsafe file name")
+	}
+	base, err := filepath.Abs(outputDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve output dir: %w", err)
+	}
+	target := filepath.Join(base, cleanName)
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return "", fmt.Errorf("resolve target path: %w", err)
+	}
+	if targetAbs != base && !strings.HasPrefix(targetAbs, base+string(os.PathSeparator)) {
+		return "", fmt.Errorf("target escapes output dir")
+	}
+	return targetAbs, nil
 }
 
 func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
@@ -195,9 +243,14 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := filepath.Join(config.ConfigData.OutputDir, fileName)
+	filePath, err := safeOutputPath(config.ConfigData.OutputDir, fileName)
+	if err != nil {
+		http.Error(w, "Invalid file path", http.StatusBadRequest)
+		logger.Errorf("Invalid receive path %q: %v", fileName, err)
+		return
+	}
 	dir := filepath.Dir(filePath)
-	err := os.MkdirAll(dir, os.ModePerm)
+	err = os.MkdirAll(dir, os.ModePerm)
 	if err != nil {
 		http.Error(w, "Failed to create directory", http.StatusInternalServerError)
 		logger.Errorf("Error creating directory: %v", err)
@@ -283,6 +336,17 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Success("File saved to:", filePath)
+	if _, err := history.Add(history.Record{
+		Direction:       history.DirectionReceived,
+		Status:          history.StatusCompleted,
+		FileName:        fileName,
+		Path:            filePath,
+		Size:            contentLength,
+		PeerAlias:       sessionData.peerAlias,
+		PeerFingerprint: sessionData.fingerprint,
+	}); err != nil {
+		logger.Warnf("Failed to record receive history: %v", err)
+	}
 	receiveSessionsMu.Lock()
 	sessionData = receiveSessions[sessionID]
 	delete(sessionData.tokens, fileID)
