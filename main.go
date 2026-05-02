@@ -364,6 +364,13 @@ func main() {
 		}
 	}
 
+	dashboardMode := len(flag.Args()) == 0
+	restoreDashboardLogs := func() {}
+	if dashboardMode {
+		restoreDashboardLogs = logger.SuppressInfoAndBelow()
+		defer restoreDashboardLogs()
+	}
+
 	// Load the trust list so PrepareReceive can short-circuit prompts for
 	// previously-approved fingerprints.
 	if err := trust.Load(); err != nil {
@@ -438,6 +445,8 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+
+		restoreDashboardLogs()
 
 		switch result.Action {
 		case tui.MainActionExit, tui.MainActionNone:

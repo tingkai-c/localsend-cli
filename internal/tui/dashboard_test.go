@@ -164,7 +164,7 @@ func TestMainDashboardApprovalModalDecisions(t *testing.T) {
 	updated, _ := m.Update(approvalRequestedMsg{Pending: pending})
 	m = updated.(dashboardModel)
 	view := m.View()
-	if !strings.Contains(view, "Incoming Transfer Approval") || !strings.Contains(view, "Phone") {
+	if !strings.Contains(view, "🔔 Incoming transfer") || !strings.Contains(view, "Phone") {
 		t.Fatalf("approval modal not rendered:\n%s", view)
 	}
 
@@ -229,5 +229,19 @@ func TestMainDashboardForgetTrusted(t *testing.T) {
 	}
 	if len(m.deps.Trusted) != 1 || m.deps.Trusted[0].Fingerprint != "fp-one" {
 		t.Fatalf("trusted = %#v", m.deps.Trusted)
+	}
+}
+
+func TestMainDashboardCentersInWindowAndUsesModernIcons(t *testing.T) {
+	m := newDashboardModel(MainDeps{DeviceName: "Laptop", Port: 53317, OutputDir: "/tmp/downloads"})
+	updated, _ := m.Update(bubbletea.WindowSizeMsg{Width: 100, Height: 36})
+	m = updated.(dashboardModel)
+
+	view := m.View()
+	if firstLine := strings.SplitN(view, "\n", 2)[0]; strings.TrimSpace(firstLine) != "" {
+		t.Fatalf("expected vertically centered dashboard to start with vertical padding, first line %q", firstLine)
+	}
+	if !strings.Contains(view, "✨ LocalSend CLI") || !strings.Contains(view, "🚀 Send") || !strings.Contains(view, "📡 Receive") {
+		t.Fatalf("expected modern dashboard icons, got:\n%s", view)
 	}
 }

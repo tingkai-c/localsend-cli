@@ -76,6 +76,26 @@ func GetLogger() *Logger {
 	return logger
 }
 
+// SuppressInfoAndBelow raises the active logger threshold while a caller owns a
+// terminal UI that would be corrupted by background informational logs. The
+// returned function restores the previous threshold and is safe to call more
+// than once.
+func SuppressInfoAndBelow() func() {
+	checkLogger()
+
+	previousLevel := logger.GetLevel()
+	if previousLevel > logrus.WarnLevel {
+		logger.SetLevel(logrus.WarnLevel)
+	}
+
+	var restoreOnce sync.Once
+	return func() {
+		restoreOnce.Do(func() {
+			logger.SetLevel(previousLevel)
+		})
+	}
+}
+
 // Success 打印带有绿色 [Success] 标签的信息
 func Success(args ...interface{}) {
 	checkLogger()

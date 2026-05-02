@@ -196,19 +196,20 @@ type dashboardModel struct {
 	trustedCursor   int
 	pendingApproval *approval.PendingRequest
 	width           int
+	height          int
 }
 
 func newDashboardModel(deps MainDeps) dashboardModel {
 	return dashboardModel{
 		view: dashboardViewMenu,
 		items: []dashboardMenuItem{
-			{label: "📤 Send", action: MainActionSend},
-			{label: "📥 Receive", action: MainActionReceive},
-			{label: "🌎 Web", action: MainActionWeb},
-			{label: "📜 History", action: MainActionHistory},
-			{label: "🔐 Trusted", action: MainActionTrusted},
-			{label: "⚙ Settings/Help", action: MainActionSettings},
-			{label: "❌ Exit", action: MainActionExit},
+			{label: "🚀 Send", action: MainActionSend},
+			{label: "📡 Receive", action: MainActionReceive},
+			{label: "🌐 Web Portal", action: MainActionWeb},
+			{label: "🕘 Activity", action: MainActionHistory},
+			{label: "🛡️ Trusted", action: MainActionTrusted},
+			{label: "✨ Settings", action: MainActionSettings},
+			{label: "⏻ Exit", action: MainActionExit},
 		},
 		textInput: initialDashboardTextInputModel(),
 		deps:      deps,
@@ -238,20 +239,31 @@ func waitForApproval(requests <-chan approval.PendingRequest) bubbletea.Cmd {
 }
 
 var (
+	dashPanelStyle = lipgloss.NewStyle().
+			Padding(1, 3).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#7C5CFF"))
+
 	dashTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#7571F9")).
-			Border(lipgloss.RoundedBorder()).
-			Padding(0, 2).
+			Foreground(lipgloss.Color("#A78BFA")).
+			Align(lipgloss.Center).
 			MarginBottom(1)
 
 	dashMenuStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA")).
-			PaddingLeft(4)
+			Foreground(lipgloss.Color("#E5E7EB")).
+			PaddingLeft(2)
+
+	dashMutedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9CA3AF")).
+			PaddingLeft(2)
 
 	dashSelectedItemStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7571F9")).
-				PaddingLeft(2).
+				Foreground(lipgloss.Color("#111827")).
+				Background(lipgloss.Color("#A78BFA")).
+				Bold(true).
+				Padding(0, 1).
+				MarginLeft(1).
 				SetString("❯ ")
 
 	dashUnselectedItemStyle = lipgloss.NewStyle().
@@ -259,7 +271,8 @@ var (
 				PaddingLeft(4)
 
 	dashInputPromptStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7571F9")).
+				Foreground(lipgloss.Color("#A78BFA")).
+				Bold(true).
 				PaddingLeft(2)
 
 	dashInputStyle = lipgloss.NewStyle().
@@ -275,6 +288,7 @@ func (m dashboardModel) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cm
 		return m, nil
 	case bubbletea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		return m, nil
 	case bubbletea.MouseMsg:
 		return m.updateMouse(msg)
@@ -477,20 +491,20 @@ func (m dashboardModel) result() MainResult {
 func (m dashboardModel) View() string {
 	var s strings.Builder
 
-	s.WriteString(dashTitleStyle.Render("LocalSend CLI"))
+	s.WriteString(dashTitleStyle.Render("✨ LocalSend CLI"))
 	s.WriteString("\n")
-	s.WriteString(dashMenuStyle.Render("Receiver is ready for Quick Save and trusted senders"))
+	s.WriteString(dashMenuStyle.Render("🟢 Receiver ready for Quick Save and trusted senders"))
 	s.WriteString("\n")
-	s.WriteString(dashMenuStyle.Render(fmt.Sprintf("Device: %s  Port: %d", m.deps.DeviceName, m.deps.Port)))
+	s.WriteString(dashMutedStyle.Render(fmt.Sprintf("💻 %s  •  Port %d", m.deps.DeviceName, m.deps.Port)))
 	s.WriteString("\n")
-	s.WriteString(dashMenuStyle.Render("Output: " + m.deps.OutputDir))
+	s.WriteString(dashMutedStyle.Render("📁 " + m.deps.OutputDir))
 	s.WriteString("\n")
-	s.WriteString(dashMenuStyle.Render(fmt.Sprintf("History: %d records  Trusted: %d senders", len(m.deps.History), len(m.deps.Trusted))))
+	s.WriteString(dashMutedStyle.Render(fmt.Sprintf("🕘 %d transfers  •  🛡️ %d trusted", len(m.deps.History), len(m.deps.Trusted))))
 	s.WriteString("\n\n")
 
 	if m.pendingApproval != nil {
 		m.renderApproval(&s)
-		return s.String()
+		return m.renderCenteredPanel(s.String())
 	}
 
 	switch m.view {
@@ -506,12 +520,26 @@ func (m dashboardModel) View() string {
 		m.renderSettings(&s)
 	}
 
-	return s.String()
+	return m.renderCenteredPanel(s.String())
+}
+
+func (m dashboardModel) renderCenteredPanel(body string) string {
+	panel := dashPanelStyle
+	if m.width > 0 {
+		panelWidth := m.width - 12
+		if panelWidth > 64 {
+			panelWidth = 64
+		}
+		if panelWidth > 36 {
+			panel = panel.Width(panelWidth)
+		}
+	}
+	return centerInTerminal(panel.Render(body), m.width, m.height)
 }
 
 func (m dashboardModel) renderApproval(s *strings.Builder) {
 	req := m.pendingApproval.Request
-	s.WriteString(dashInputPromptStyle.Render("Incoming Transfer Approval"))
+	s.WriteString(dashInputPromptStyle.Render("🔔 Incoming transfer"))
 	s.WriteString("\n")
 	s.WriteString(dashMenuStyle.Render(fmt.Sprintf("From: %s (%s)", req.Alias, shortFingerprint(req.Fingerprint))))
 	s.WriteString("\n")
@@ -545,7 +573,7 @@ func shortFingerprint(fingerprint string) string {
 }
 
 func (m dashboardModel) renderMenu(s *strings.Builder) {
-	s.WriteString(dashInputPromptStyle.Render("Choose an action"))
+	s.WriteString(dashInputPromptStyle.Render("⌘ Choose an action"))
 	s.WriteString("\n")
 	for i, item := range m.items {
 		if i == m.cursor {
@@ -560,14 +588,14 @@ func (m dashboardModel) renderMenu(s *strings.Builder) {
 }
 
 func (m dashboardModel) renderSend(s *strings.Builder) {
-	s.WriteString(dashInputPromptStyle.Render("Enter file path: "))
+	s.WriteString(dashInputPromptStyle.Render("📦 File path: "))
 	s.WriteString(dashInputStyle.Render(m.textInput.View()))
 	s.WriteString("\n")
 	s.WriteString(dashMenuStyle.Render("Tab: complete path • Esc: back • Ctrl+C: quit"))
 }
 
 func (m dashboardModel) renderHistory(s *strings.Builder) {
-	s.WriteString(dashInputPromptStyle.Render("Transfer History"))
+	s.WriteString(dashInputPromptStyle.Render("🕘 Transfer history"))
 	s.WriteString("\n")
 	if len(m.deps.History) == 0 {
 		s.WriteString(dashMenuStyle.Render("No transfer history yet."))
@@ -600,7 +628,7 @@ func (m dashboardModel) renderHistory(s *strings.Builder) {
 }
 
 func (m dashboardModel) renderTrusted(s *strings.Builder) {
-	s.WriteString(dashInputPromptStyle.Render("Trusted Senders"))
+	s.WriteString(dashInputPromptStyle.Render("🛡️ Trusted senders"))
 	s.WriteString("\n")
 	if len(m.deps.Trusted) == 0 {
 		s.WriteString(dashMenuStyle.Render("No trusted senders yet."))
@@ -624,7 +652,7 @@ func (m dashboardModel) renderTrusted(s *strings.Builder) {
 }
 
 func (m dashboardModel) renderSettings(s *strings.Builder) {
-	s.WriteString(dashInputPromptStyle.Render("Settings / Help"))
+	s.WriteString(dashInputPromptStyle.Render("✨ Settings / Help"))
 	s.WriteString("\n")
 	quickSave := "off"
 	if m.deps.QuickSave {

@@ -75,6 +75,7 @@ type model struct {
 	cursor     int
 	updates    <-chan []models.SendModel
 	width      int
+	height     int
 }
 
 // DashboardAction 表示仪表盘可识别的高层操作。
@@ -98,21 +99,22 @@ type DashboardResult struct {
 
 var (
 	appStyle = lipgloss.NewStyle().
-			Padding(1, 2).
+			Padding(1, 3).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("63"))
+			BorderForeground(lipgloss.Color("#7C5CFF"))
 
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("86"))
+			Foreground(lipgloss.Color("#A78BFA")).
+			Align(lipgloss.Center)
 
 	subtitleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("245"))
 
 	selectedStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("230")).
-			Background(lipgloss.Color("63")).
+			Foreground(lipgloss.Color("#111827")).
+			Background(lipgloss.Color("#A78BFA")).
 			Padding(0, 1)
 
 	normalStyle = lipgloss.NewStyle().
@@ -215,6 +217,7 @@ func (m model) UpdateDashboard(msg bubbletea.Msg) DashboardResult {
 		return DashboardResult{Action: DashboardActionNone, Model: m, Cmd: tick()}
 	case bubbletea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 	}
 	return DashboardResult{Action: DashboardActionNone, Model: m}
 }
@@ -240,33 +243,36 @@ func dashboardActionFromKey(key string) DashboardAction {
 func (m model) View() string {
 	panel := appStyle
 	if m.width > 0 {
-		maxWidth := m.width - 2
-		if maxWidth > 32 {
-			panel = panel.MaxWidth(maxWidth)
+		panelWidth := m.width - 12
+		if panelWidth > 58 {
+			panelWidth = 58
+		}
+		if panelWidth > 32 {
+			panel = panel.Width(panelWidth)
 		}
 	}
 
 	if len(m.devices) == 0 {
 		body := strings.Join([]string{
-			titleStyle.Render("LocalSend"),
+			titleStyle.Render("✨ LocalSend"),
 			"",
-			emptyStyle.Render("⏳ Scanning for nearby devices..."),
+			emptyStyle.Render("🛰️ Scanning for nearby devices…"),
 			"",
 			helpStyle.Render("Press Ctrl+C to exit"),
 		}, "\n")
-		return panel.Render(body)
+		return centerInTerminal(panel.Render(body), m.width, m.height)
 	}
 
 	lines := []string{
-		titleStyle.Render("LocalSend"),
-		subtitleStyle.Render(fmt.Sprintf("Found Devices • %d online", len(m.devices))),
+		titleStyle.Render("✨ LocalSend"),
+		subtitleStyle.Render(fmt.Sprintf("📡 Nearby devices • %d online", len(m.devices))),
 		"",
 	}
 
 	for i, device := range m.devices {
 		mark := "○"
 		if m.selected[device.IP] {
-			mark = "●"
+			mark = "◉"
 		}
 		line := fmt.Sprintf("  %s %s  %s", mark, device.DeviceName, subtitleStyle.Render(device.IP))
 		if m.cursor == i {
@@ -276,8 +282,8 @@ func (m model) View() string {
 		lines = append(lines, normalStyle.Render("  "+line))
 	}
 
-	lines = append(lines, "", helpStyle.Render("↑/↓ or j/k: navigate • Space: toggle • Enter: send to selected/current • Ctrl+C: quit"))
-	return panel.Render(strings.Join(lines, "\n"))
+	lines = append(lines, "", helpStyle.Render("↕ Navigate • Space: toggle • Enter: send • Ctrl+C: quit"))
+	return centerInTerminal(panel.Render(strings.Join(lines, "\n")), m.width, m.height)
 }
 
 func (m model) selectedIPs() []string {

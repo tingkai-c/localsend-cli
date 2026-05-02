@@ -152,3 +152,14 @@ func TestDeviceDashboardToggleMultiSelect(t *testing.T) {
 		t.Fatalf("selected IPs = %#v", got)
 	}
 }
+
+func TestDeviceDashboardCentersInWindowAndUsesModernIcons(t *testing.T) {
+	m := model{width: 100, height: 30}
+	view := m.View()
+	if firstLine := strings.SplitN(view, "\n", 2)[0]; strings.TrimSpace(firstLine) != "" {
+		t.Fatalf("expected vertically centered device dashboard to start with vertical padding, first line %q", firstLine)
+	}
+	if !strings.Contains(view, "✨ LocalSend") || !strings.Contains(view, "🛰️ Scanning for nearby devices…") {
+		t.Fatalf("expected modern scan state icons, got:\n%s", view)
+	}
+}
